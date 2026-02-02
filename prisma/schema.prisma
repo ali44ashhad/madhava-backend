@@ -1,0 +1,343 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum OrderStatus {
+  PLACED
+  CONFIRMED
+  ON_HOLD
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURN_REQUESTED
+  RETURN_APPROVED
+  RETURN_REJECTED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  COD
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+  FAILED
+  REFUNDED
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+enum RefundStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// CORE MODELS
+// ============================================
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  imageUrl  String?
+  isActive  Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subcategories Subcategory[]
+  products      Product[]
+
+  @@map("categories")
+}
+
+model Subcategory {
+  id         String   @id @default(uuid())
+  name       String
+  slug       String
+  imageUrl   String?
+  isActive   Boolean  @default(true)
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  products   Product[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([categoryId, slug])
+  @@map("subcategories")
+}
+
+model Product {
+  id            String   @id @default(uuid())
+  name          String
+  description   String?
+  isFeatured    Boolean  @default(false)
+  isActive      Boolean  @default(true)
+
+  categoryId    String
+  subcategoryId String
+
+  category      Category    @relation(fields: [categoryId], references: [id])
+  subcategory   Subcategory @relation(fields: [subcategoryId], references: [id])
+
+  skus          Sku[]
+  images        ProductImage[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("products")
+}
+
+model ProductImage {
+  id        String  @id @default(uuid())
+  imageUrl  String
+  sortOrder Int     @default(0)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@map("product_images")
+}
+
+model Sku {
+  id        String @id @default(uuid())
+  skuCode   String @unique
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  size      String?
+  weight    String?
+  material  String?
+  color     String?
+
+  mrp            Decimal
+  sellingPrice   Decimal
+  festivePrice   Decimal?
+  gstPercent     Decimal
+
+  stockQuantity  Int
+  isCodAllowed   Boolean @default(true)
+  isActive       Boolean @default(true)
+
+  countryOfOrigin      String
+  manufacturerName     String
+  manufacturerAddress  String
+  sellerName           String
+  sellerAddress        String
+  sellerPincode        String
+
+  images      SkuImage[]
+  orderItems  OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("skus")
+}
+
+model SkuImage {
+  id        String @id @default(uuid())
+  imageUrl  String
+  sortOrder Int    @default(0)
+
+  skuId String
+  sku   Sku @relation(fields: [skuId], references: [id])
+
+  @@map("sku_images")
+}
+
+// ============================================
+// CUSTOMER & ADDRESS
+// ============================================
+
+model Customer {
+  id    String @id @default(uuid())
+  name  String
+  email String @unique
+  phone String
+
+  addresses Address[]
+  orders    Order[]
+
+  createdAt DateTime @default(now())
+
+  @@map("customers")
+}
+
+model Address {
+  id       String @id @default(uuid())
+  name     String
+  phone    String
+
+  line1    String
+  line2    String?
+  city     String
+  state    String
+  pincode  String
+  isDefault Boolean @default(false)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  @@map("addresses")
+}
+
+// ============================================
+// ORDERS (IMMUTABLE CORE)
+// ============================================
+
+model Order {
+  id          String      @id @default(uuid())
+  orderNumber String      @unique
+
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id])
+
+  addressSnapshot Json
+  shippingInfo    Json?
+
+  status        OrderStatus
+  paymentMethod PaymentMethod
+  paymentStatus PaymentStatus
+
+  subtotalAmount Decimal
+  gstAmount      Decimal
+  codFee         Decimal
+  totalAmount    Decimal
+
+  orderItems OrderItem[]
+  payments   Payment[]
+  refunds    Refund[]
+
+  placedAt    DateTime @default(now())
+  confirmedAt DateTime?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  cancelledAt DateTime?
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+
+  orderId String
+  order   Order @relation(fields: [orderId], references: [id])
+
+  skuId       String
+  sku         Sku @relation(fields: [skuId], references: [id])
+
+  skuSnapshot Json
+
+  quantity      Int
+  pricePerUnit  Decimal
+  gstPercent    Decimal
+  totalPrice   Decimal
+
+  return Return?
+
+  @@map("order_items")
+}
+
+// ============================================
+// PAYMENTS, RETURNS & REFUNDS
+// ============================================
+
+model Payment {
+  id        String @id @default(uuid())
+  orderId   String
+  order     Order  @relation(fields: [orderId], references: [id])
+
+  provider  String
+  reference String?
+
+  amount    Decimal
+  status    PaymentStatus
+
+  createdAt DateTime @default(now())
+
+  @@map("payments")
+}
+
+model Return {
+  id        String @id @default(uuid())
+  orderItemId String @unique
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+
+  reason       String
+  customerNote String?
+  status       ReturnStatus
+
+  images   ReturnImage[]
+
+  requestedAt DateTime @default(now())
+  reviewedAt  DateTime?
+
+  @@map("returns")
+}
+
+model ReturnImage {
+  id       String @id @default(uuid())
+  imageUrl String
+
+  returnId String
+  return   Return @relation(fields: [returnId], references: [id])
+
+  @@map("return_images")
+}
+
+model Refund {
+  id        String @id @default(uuid())
+  orderId   String
+  order     Order @relation(fields: [orderId], references: [id])
+
+  amount    Decimal
+  status    RefundStatus
+  reference String?
+
+  createdAt DateTime @default(now())
+
+  @@map("refunds")
+}
+
+// ============================================
+// ADMIN
+// ============================================
+
+model Admin {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  passwordHash String
+  role        String   @default("ADMIN")
+  isActive    Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+
+  @@map("admins")
+}
+
