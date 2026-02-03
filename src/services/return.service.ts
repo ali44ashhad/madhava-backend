@@ -421,3 +421,43 @@ export async function rejectReturn(returnId: string, adminId: string, reason: st
   });
 }
 
+
+/**
+ * Get return details for email notification
+ */
+export async function getReturnDetailsForEmail(returnId: string) {
+  const returnRecord = await prisma.return.findUnique({
+    where: { id: returnId },
+    include: {
+      orderItem: {
+        include: {
+          order: {
+            include: {
+              customer: {
+                select: {
+                  email: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!returnRecord) {
+    throw new AppError('NOT_FOUND', `Return with id '${returnId}' not found`, 404);
+  }
+
+  const order = returnRecord.orderItem.order;
+  const customer = order.customer;
+  const customerName = customer.name || 'Customer';
+
+  return {
+    returnRecord,
+    order,
+    customerName,
+    customerEmail: customer.email,
+  };
+}

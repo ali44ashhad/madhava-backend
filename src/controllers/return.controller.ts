@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { requestReturn, listReturnRequests, approveReturn, rejectReturn } from '../services/return.service.js';
+import { requestReturn, listReturnRequests, approveReturn, rejectReturn, getReturnDetailsForEmail } from '../services/return.service.js';
+import { emailService } from '../emails/email.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -87,6 +88,22 @@ export async function requestReturnController(
     });
 
     res.status(201).json(response);
+
+    // Send email notification (async)
+    getReturnDetailsForEmail(result.returnId)
+      .then(async (details) => {
+        await emailService.sendReturnRequested(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+          returnId: details.returnRecord.id,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger return requested email', {
+          error: err instanceof Error ? err.message : String(err),
+          returnId: result.returnId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in request return controller', {
@@ -199,6 +216,22 @@ export async function approveReturnController(
     });
 
     res.status(200).json(response);
+
+    // Send email notification (async)
+    getReturnDetailsForEmail(returnId)
+      .then(async (details) => {
+        await emailService.sendReturnApproved(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+          returnId: details.returnRecord.id,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger return approved email', {
+          error: err instanceof Error ? err.message : String(err),
+          returnId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in approve return controller', {
@@ -268,6 +301,23 @@ export async function rejectReturnController(
     });
 
     res.status(200).json(response);
+
+    // Send email notification (async)
+    getReturnDetailsForEmail(returnId)
+      .then(async (details) => {
+        await emailService.sendReturnRejected(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+          returnId: details.returnRecord.id,
+          reason,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger return rejected email', {
+          error: err instanceof Error ? err.message : String(err),
+          returnId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in reject return controller', {

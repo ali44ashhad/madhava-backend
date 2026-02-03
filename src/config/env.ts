@@ -13,6 +13,10 @@ export interface EnvConfig {
   adminJwtSecret: string;
   adminJwtExpiresIn: string;
   bcryptSaltRounds: number;
+  sesRegion: string;
+  sesAccessKeyId: string;
+  sesSecretAccessKey: string;
+  emailFromAddress: string;
 }
 
 /**
@@ -25,6 +29,10 @@ const REQUIRED_ENV_VARS = [
   'ADMIN_JWT_SECRET',
   'ADMIN_JWT_EXPIRES_IN',
   'BCRYPT_SALT_ROUNDS',
+  'SES_REGION',
+  'SES_ACCESS_KEY_ID',
+  'SES_SECRET_ACCESS_KEY',
+  'EMAIL_FROM_ADDRESS',
 ] as const;
 
 /**
@@ -43,7 +51,7 @@ function validateEnv(): void {
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables: ${missing.join(', ')}. ` +
-        'Please ensure all required variables are set in your .env file.'
+      'Please ensure all required variables are set in your .env file.'
     );
   }
 }
@@ -89,7 +97,7 @@ function parseEnv(): EnvConfig {
       `Invalid BCRYPT_SALT_ROUNDS value: ${process.env.BCRYPT_SALT_ROUNDS}. Must be a number between 1 and 31.`
     );
   }
-  
+
   // Warn if cost factor is too high (will cause slow password verification)
   if (bcryptSaltRounds > 12) {
     console.warn(
@@ -99,6 +107,11 @@ function parseEnv(): EnvConfig {
     );
   }
 
+  const sesRegion = process.env.SES_REGION!;
+  const sesAccessKeyId = process.env.SES_ACCESS_KEY_ID!;
+  const sesSecretAccessKey = process.env.SES_SECRET_ACCESS_KEY!;
+  const emailFromAddress = process.env.EMAIL_FROM_ADDRESS!;
+
   return {
     port,
     nodeEnv,
@@ -106,6 +119,10 @@ function parseEnv(): EnvConfig {
     adminJwtSecret,
     adminJwtExpiresIn,
     bcryptSaltRounds,
+    sesRegion,
+    sesAccessKeyId,
+    sesSecretAccessKey,
+    emailFromAddress,
   };
 }
 

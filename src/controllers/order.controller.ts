@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { placeOrder, approveOrder, putOrderOnHold, cancelOrder, markOrderAsShipped, markOrderAsDelivered } from '../services/order.service.js';
+import { placeOrder, approveOrder, putOrderOnHold, cancelOrder, markOrderAsShipped, markOrderAsDelivered, getOrderDetailsForEmail } from '../services/order.service.js';
+import { emailService } from '../emails/email.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -80,6 +81,28 @@ export async function placeOrderController(
     });
 
     res.status(201).json(response);
+
+    // Send email notification (async, non-blocking)
+    getOrderDetailsForEmail(result.orderId)
+      .then(async (details) => {
+        await emailService.sendOrderPlaced(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+          totalAmount: Number(details.order.totalAmount),
+          items: details.order.orderItems.map((item) => ({
+            productName: (item.skuSnapshot as any).productName || 'Product',
+            skuCode: (item.skuSnapshot as any).skuCode || 'SKU',
+            quantity: item.quantity,
+            price: Number(item.pricePerUnit),
+          })),
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger order placed email', {
+          error: err instanceof Error ? err.message : String(err),
+          orderId: result.orderId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in place order controller', {
@@ -118,7 +141,7 @@ export async function approveOrderController(
 ): Promise<void> {
   try {
     const orderId = req.params.orderId;
-    
+
     if (!orderId) {
       throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
     }
@@ -154,6 +177,21 @@ export async function approveOrderController(
     });
 
     res.status(200).json(response);
+
+    // Send email notification
+    getOrderDetailsForEmail(orderId)
+      .then(async (details) => {
+        await emailService.sendOrderApproved(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger order approved email', {
+          error: err instanceof Error ? err.message : String(err),
+          orderId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in approve order controller', {
@@ -177,7 +215,7 @@ export async function putOrderOnHoldController(
 ): Promise<void> {
   try {
     const orderId = req.params.orderId;
-    
+
     if (!orderId) {
       throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
     }
@@ -236,7 +274,7 @@ export async function cancelOrderController(
 ): Promise<void> {
   try {
     const orderId = req.params.orderId;
-    
+
     if (!orderId) {
       throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
     }
@@ -305,7 +343,7 @@ export async function markOrderAsShippedController(
 ): Promise<void> {
   try {
     const orderId = req.params.orderId;
-    
+
     if (!orderId) {
       throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
     }
@@ -352,6 +390,23 @@ export async function markOrderAsShippedController(
     });
 
     res.status(200).json(response);
+
+    // Send email notification
+    getOrderDetailsForEmail(orderId)
+      .then(async (details) => {
+        await emailService.sendOrderShipped(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+          courier,
+          trackingId,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger order shipped email', {
+          error: err instanceof Error ? err.message : String(err),
+          orderId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in mark order as shipped controller', {
@@ -375,7 +430,7 @@ export async function markOrderAsDeliveredController(
 ): Promise<void> {
   try {
     const orderId = req.params.orderId;
-    
+
     if (!orderId) {
       throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
     }
@@ -411,6 +466,21 @@ export async function markOrderAsDeliveredController(
     });
 
     res.status(200).json(response);
+
+    // Send email notification
+    getOrderDetailsForEmail(orderId)
+      .then(async (details) => {
+        await emailService.sendOrderDelivered(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger order delivered email', {
+          error: err instanceof Error ? err.message : String(err),
+          orderId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in mark order as delivered controller', {

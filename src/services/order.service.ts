@@ -143,7 +143,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     // Calculate prices for each item
     const orderItemsData = input.items.map((item) => {
       const sku = skus.find((s) => s.id === item.skuId)!;
-      
+
       // Effective price: festivePrice ?? sellingPrice
       const effectivePrice = sku.festivePrice ?? sku.sellingPrice;
       const pricePerUnit = Number(effectivePrice);
@@ -690,3 +690,38 @@ export async function markOrderAsDelivered(orderId: string, adminId: string): Pr
   // Note: 7-day return window enforcement will be implemented when returns are added
 }
 
+/**
+ * Get order details for email notification
+ * Fetches order with customer, address, and items
+ */
+export async function getOrderDetailsForEmail(orderId: string) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      orderItems: {
+        include: {
+          sku: true,
+        }
+      },
+      customer: {
+        select: {
+          email: true,
+          name: true,
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    throw new AppError('NOT_FOUND', `Order with id '${orderId}' not found`, 404);
+  }
+
+  // Determine customer name
+  const customerName = order.customer.name || 'Customer';
+
+  return {
+    order,
+    customerName,
+    customerEmail: order.customer.email,
+  };
+}

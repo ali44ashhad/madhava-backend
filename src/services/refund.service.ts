@@ -157,3 +157,39 @@ export async function initiateRefund(orderId: string, adminId: string): Promise<
 }
 
 
+
+/**
+ * Get refund details for email notification
+ */
+export async function getRefundDetailsForEmail(refundId: string) {
+  const refund = await prisma.refund.findUnique({
+    where: { id: refundId },
+    include: {
+      order: {
+        include: {
+          customer: {
+            select: {
+              email: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!refund) {
+    throw new AppError('NOT_FOUND', `Refund with id '${refundId}' not found`, 404);
+  }
+
+  const order = refund.order;
+  const customer = order.customer;
+  const customerName = customer.name || 'Customer';
+
+  return {
+    refund,
+    order,
+    customerName,
+    customerEmail: customer.email,
+  };
+}

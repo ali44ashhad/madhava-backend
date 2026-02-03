@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { initiateRefund } from '../services/refund.service.js';
+import { initiateRefund, getRefundDetailsForEmail } from '../services/refund.service.js';
+import { emailService } from '../emails/email.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -56,6 +57,23 @@ export async function initiateRefundController(
     });
 
     res.status(201).json(response);
+
+    // Send email notification (async)
+    getRefundDetailsForEmail(result.refundId)
+      .then(async (details) => {
+        await emailService.sendRefundInitiated(details.customerEmail, {
+          orderNumber: details.order.orderNumber,
+          customerName: details.customerName,
+          amount: Number(details.refund.amount),
+          refundId: details.refund.id,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to trigger refund initiated email', {
+          error: err instanceof Error ? err.message : String(err),
+          refundId: result.refundId,
+        });
+      });
     return;
   } catch (error) {
     logger.error('Error in initiate refund controller', {
