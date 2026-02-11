@@ -7,6 +7,8 @@ import { errorMiddleware } from './middlewares/error.middleware.js';
 import { notFoundMiddleware } from './middlewares/notFound.middleware.js';
 import { env } from './config/index.js';
 
+import { razorpayWebhookController } from './webhooks/razorpay.webhook.controller.js';
+
 /**
  * Create and configure Express application
  * Registers global middlewares, routes, and error handling
@@ -14,6 +16,13 @@ import { env } from './config/index.js';
  */
 export function createApp(): Express {
   const app = express();
+
+  // Webhook routes (MUST be before express.json() to get raw body)
+  app.post(
+    '/api/v1/webhooks/razorpay',
+    express.raw({ type: 'application/json' }),
+    razorpayWebhookController
+  );
 
   // Global middlewares (order matters)
   // 1. JSON body parser

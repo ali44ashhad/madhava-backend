@@ -17,6 +17,7 @@ export interface EnvConfig {
   sesAccessKeyId: string;
   sesSecretAccessKey: string;
   emailFromAddress: string;
+  razorpayWebhookSecret: string;
 }
 
 /**
@@ -33,6 +34,7 @@ const REQUIRED_ENV_VARS = [
   'SES_ACCESS_KEY_ID',
   'SES_SECRET_ACCESS_KEY',
   'EMAIL_FROM_ADDRESS',
+  'RAZORPAY_WEBHOOK_SECRET',
 ] as const;
 
 /**
@@ -111,6 +113,7 @@ function parseEnv(): EnvConfig {
   const sesAccessKeyId = process.env.SES_ACCESS_KEY_ID!;
   const sesSecretAccessKey = process.env.SES_SECRET_ACCESS_KEY!;
   const emailFromAddress = process.env.EMAIL_FROM_ADDRESS!;
+  const razorpayWebhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET!;
 
   return {
     port,
@@ -123,6 +126,7 @@ function parseEnv(): EnvConfig {
     sesAccessKeyId,
     sesSecretAccessKey,
     emailFromAddress,
+    razorpayWebhookSecret,
   };
 }
 
