@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { adminLogin } from '../controllers/admin-auth.controller.js';
 import { getMe } from '../controllers/admin.controller.js';
+import { getDashboard } from '../controllers/dashboard.controller.js';
 import { createCategoryController, listCategoriesController } from '../controllers/category.controller.js';
 import { createSubcategoryController, listSubcategoriesController } from '../controllers/subcategory.controller.js';
 import { createProductController } from '../controllers/product.controller.js';
@@ -25,6 +26,7 @@ router.use(adminAuth);
 
 // Protected routes
 router.get('/me', getMe);
+router.get('/dashboard', getDashboard);
 
 // Category management
 router.post('/categories', createCategoryController);
