@@ -183,6 +183,7 @@ model Customer {
 
   addresses Address[]
   orders    Order[]
+  sessions  CustomerSession[]
 
   createdAt DateTime @default(now())
 
@@ -205,6 +206,31 @@ model Address {
   customer   Customer @relation(fields: [customerId], references: [id])
 
   @@map("addresses")
+}
+
+model OtpVerification {
+  id        String   @id @default(uuid())
+  phone     String
+  otpHash   String
+  purpose   String   @default("LOGIN") // SIGNUP | LOGIN - default for backward compatibility if needed, though we will set it explicitly
+  payload   Json?
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@map("otp_verifications")
+}
+
+model CustomerSession {
+  id         String   @id @default(uuid())
+  customerId String
+  tokenHash  String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  @@map("customer_sessions")
 }
 
 // ============================================

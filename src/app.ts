@@ -2,6 +2,7 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import cookieParser from 'cookie-parser';
 import routes from './routes/index.js';
 import { errorMiddleware } from './middlewares/error.middleware.js';
 import { notFoundMiddleware } from './middlewares/notFound.middleware.js';
@@ -37,6 +38,9 @@ export function createApp(): Express {
   // 4. Request logging (Morgan)
   const morganFormat = env.nodeEnv === 'production' ? 'combined' : 'dev';
   app.use(morgan(morganFormat));
+
+  // 5. Cookie parser
+  app.use(cookieParser());
 
   // Register routes
   app.use('/', routes);
