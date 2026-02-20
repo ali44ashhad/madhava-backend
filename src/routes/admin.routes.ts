@@ -4,9 +4,9 @@ import { getMe } from '../controllers/admin.controller.js';
 import { getDashboard } from '../controllers/dashboard.controller.js';
 import { createCategoryController, listCategoriesController } from '../controllers/category.controller.js';
 import { createSubcategoryController, listSubcategoriesController } from '../controllers/subcategory.controller.js';
-import { createProductController } from '../controllers/product.controller.js';
-import { createSkuController, getSkuInventoryController, updateSkuStockController } from '../controllers/sku.controller.js';
-import { approveOrderController, putOrderOnHoldController, cancelOrderController, markOrderAsShippedController, markOrderAsDeliveredController } from '../controllers/order.controller.js';
+import { createProductController, addProductImageController, listProductsController } from '../controllers/product.controller.js';
+import { createSkuController, getSkuInventoryController, updateSkuStockController, addSkuImageController, listSkusController } from '../controllers/sku.controller.js';
+import { approveOrderController, putOrderOnHoldController, cancelOrderController, markOrderAsShippedController, markOrderAsDeliveredController, listOrdersController } from '../controllers/order.controller.js';
 import { listReturnRequestsController, approveReturnController, rejectReturnController } from '../controllers/return.controller.js';
 import { initiateRefundController } from '../controllers/refund.controller.js';
 import { adminAuth } from '../middlewares/adminAuth.middleware.js';
@@ -38,13 +38,18 @@ router.get('/subcategories', listSubcategoriesController);
 
 // Product management
 router.post('/products', createProductController);
+router.get('/products', listProductsController);
+router.post('/products/:productId/images', addProductImageController);
 
 // SKU management
+router.get('/skus', listSkusController);
 router.post('/skus', createSkuController);
 router.get('/skus/:skuId/inventory', getSkuInventoryController);
 router.patch('/skus/:skuId/stock', updateSkuStockController);
+router.post('/skus/:skuId/images', addSkuImageController);
 
 // Order management
+router.get('/orders', listOrdersController);
 router.post('/orders/:orderId/approve', approveOrderController);
 router.post('/orders/:orderId/on-hold', putOrderOnHoldController);
 router.post('/orders/:orderId/cancel', cancelOrderController);

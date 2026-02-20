@@ -5,6 +5,8 @@ import storeRoutes from './store.routes.js';
 
 import authRoutes from './auth.routes.js';
 
+import cartRoutes from './cart.routes.js';
+
 const router = Router();
 
 /**
@@ -15,6 +17,7 @@ router.use('/', healthRoutes);
 router.use('/api/v1/auth', authRoutes);
 router.use('/api/v1/admin', adminRoutes);
 router.use('/api/v1/store', storeRoutes);
+router.use('/api/v1/store/cart', cartRoutes);
 
 export default router;
 

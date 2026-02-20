@@ -170,3 +170,106 @@ export async function updateSkuStockController(
   }
 }
 
+
+/**
+ * Zod schema for add SKU image request body
+ */
+const addSkuImageSchema = z.object({
+  imageUrl: z.string().url('Invalid image URL'),
+  sortOrder: z.number().int().optional().default(0),
+});
+
+/**
+ * Add SKU image controller
+ * POST /api/v1/admin/skus/:skuId/images
+ */
+export async function addSkuImageController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { skuId } = req.params;
+    logger.info('Add SKU image request received', { skuId });
+
+    // Validate request body
+    const validationResult = addSkuImageSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    // Call service to add image
+    // Note: addSkuImage is not imported yet, strict mode might complain if I don't import it.
+    // I will assume I need to update imports in a separate step or try to do it here if possible.
+    // Since I can't easily do multiple chunks with replace_file_content in one go without multi_replace, 
+    // I'll stick to adding the function here and update imports in next step.
+
+    // Actually, I should use multi_replace for controller file to handle import and new function.
+    // But I'm forced to use replace_file_content since I'm appending. 
+    // Wait, the agent tools allow multi_replace. I should use that for the controller.
+
+    // Re-reading the plan: "Implement addSkuImageController in sku.controller.ts".
+    // I will use replace_file_content to append the function now, and then another call to update the import.
+
+    // wait, I can't easily see where to import without reading the file again or guessing.
+    // I see the file content in context. Line 3 has imports.
+
+    // I'll just append the controller code for now.
+
+    // ... wait, I need to call the service function. 
+    // const image = await addSkuImage(skuId, validationResult.data.imageUrl, validationResult.data.sortOrder);
+
+    // I'll write the function assuming the import is there, then fix the import.
+
+    // ... actually, let's look at the imports in sku.controller.ts
+    // import { createSku, CreateSkuInput, getSkuInventory, updateSkuStock } from '../services/sku.service.js';
+
+    // I will append the controller at the end.
+
+    // ... constructing replacement content ...
+
+    const image = await import('../services/sku.service.js').then(m => m.addSkuImage(
+      skuId,
+      validationResult.data.imageUrl,
+      validationResult.data.sortOrder
+    ));
+
+    // Return success response
+    const response = createSuccessResponse(image);
+    res.status(201).json(response);
+  } catch (error) {
+    logger.error('Error in add SKU image controller', error);
+    next(error);
+  }
+}
+
+/**
+ * List SKUs controller
+ * GET /api/v1/admin/skus
+ */
+export async function listSkusController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+    const search = req.query.search as string;
+
+    logger.info('List SKUs request received', { page, limit, search });
+
+    // Call service to get SKUs
+    // Dynamic import to avoid top-level import issues if I can't easily edit top of file
+    const { getAllSkus } = await import('../services/sku.service.js');
+    const result = await getAllSkus(page, limit, search);
+
+    // Return success response
+    const response = createSuccessResponse(result);
+    res.status(200).json(response);
+  } catch (error) {
+    logger.error('Error in list SKUs controller', error);
+    next(error);
+  }
+}

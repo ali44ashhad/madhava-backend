@@ -153,6 +153,7 @@ model Sku {
 
   images      SkuImage[]
   orderItems  OrderItem[]
+  cartItems   CartItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -184,6 +185,7 @@ model Customer {
   addresses Address[]
   orders    Order[]
   sessions  CustomerSession[]
+  cart      Cart?
 
   createdAt DateTime @default(now())
 
@@ -367,3 +369,31 @@ model Admin {
   @@map("admins")
 }
 
+
+// ============================================
+// CART (STATE ONLY)
+// ============================================
+
+model Cart {
+  id         String     @id @default(uuid())
+  customerId String     @unique
+  customer   Customer   @relation(fields: [customerId], references: [id])
+  items      CartItem[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  skuId     String
+  quantity  Int
+
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  sku       Sku      @relation(fields: [skuId], references: [id])
+
+  @@unique([cartId, skuId])
+  @@map("cart_items")
+}

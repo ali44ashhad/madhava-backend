@@ -725,3 +725,103 @@ export async function getOrderDetailsForEmail(orderId: string) {
     customerEmail: order.customer.email,
   };
 }
+
+/**
+ * Get customer orders service
+ * Fetches all orders for a specific customer
+ */
+export async function getCustomerOrders(customerId: string) {
+  logger.info('Get customer orders request', { customerId });
+
+  const orders = await prisma.order.findMany({
+    where: { customerId },
+    orderBy: { placedAt: 'desc' },
+    include: {
+      orderItems: {
+        include: {
+          sku: true,
+        }
+      },
+      payments: true,
+    },
+  });
+
+  return orders;
+}
+
+/**
+ * Get order by ID service
+ * Fetches a specific order by ID
+ */
+export async function getOrderById(orderId: string) {
+  logger.info('Get order by ID request', { orderId });
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      orderItems: {
+        include: {
+          sku: true,
+        }
+      },
+      payments: true,
+      customer: {
+        select: {
+          name: true,
+          email: true,
+          phone: true,
+        }
+      }
+    },
+  });
+
+  if (!order) {
+    throw new AppError('NOT_FOUND', `Order with id '${orderId}' not found`, 404);
+  }
+
+  return order;
+}
+
+/**
+ * Get all orders service (Admin)
+ * Fetches all orders with pagination and sorting
+ */
+export async function getAllOrders(page: number = 1, limit: number = 20) {
+  logger.info('Get all orders request', { page, limit });
+
+  const skip = (page - 1) * limit;
+
+  const [orders, total] = await Promise.all([
+    prisma.order.findMany({
+      skip,
+      take: limit,
+      orderBy: { placedAt: 'desc' },
+      include: {
+        orderItems: {
+          include: {
+            sku: true,
+          }
+        },
+        payments: true,
+        customer: {
+          select: {
+            name: true,
+            email: true,
+            phone: true,
+          }
+        }
+      },
+    }),
+    prisma.order.count(),
+  ]);
+
+  return {
+    orders,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    }
+  };
+}

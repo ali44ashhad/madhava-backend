@@ -101,3 +101,25 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Create
   }
 }
 
+/**
+ * Get customer by ID
+ */
+export async function getCustomerById(customerId: string) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      createdAt: true,
+    },
+  });
+
+  if (!customer) {
+    throw new AppError('NOT_FOUND', 'Customer not found', 404);
+  }
+
+  return customer;
+}
+

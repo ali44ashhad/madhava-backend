@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { placeOrder, approveOrder, putOrderOnHold, cancelOrder, markOrderAsShipped, markOrderAsDelivered, getOrderDetailsForEmail } from '../services/order.service.js';
+import { placeOrder, approveOrder, putOrderOnHold, cancelOrder, markOrderAsShipped, markOrderAsDelivered, getOrderDetailsForEmail, getCustomerOrders, getOrderById, getAllOrders } from '../services/order.service.js';
 import { emailService } from '../emails/email.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
@@ -491,3 +491,141 @@ export async function markOrderAsDeliveredController(
   }
 }
 
+/**
+ * Get my orders controller
+ * GET /api/v1/store/orders
+ * 
+ * Fetches all orders for the authenticated customer
+ */
+export async function getMyOrdersController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    // Extract customer ID (set by auth middleware)
+    if (!req.customer) { // Assuming auth middleware sets req.customer
+      // If the middleware puts it in req.user or similar, we need to adjust.
+      // Let's assume req.customer based on standard practice in this repo (need to verify auth middleware if unsure)
+      // Checking createCustomerController might give a hint but that's public.
+      // Let's check how other protected routes access user info.
+      throw new AppError('UNAUTHORIZED', 'User not authenticated', 401);
+    }
+
+    const customerId = req.customer.id;
+
+    logger.info('Get my orders request received', {
+      customerId,
+    });
+
+    // Call service to get orders
+    const orders = await getCustomerOrders(customerId);
+
+    logger.info('My orders fetched successfully', {
+      customerId,
+      count: orders.length,
+    });
+
+    // Return success response
+    const response = createSuccessResponse(orders);
+
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in get my orders controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error);
+  }
+}
+
+/**
+ * Get order by ID controller
+ * GET /api/v1/store/orders/:orderId
+ * 
+ * Fetches order details. Verifies ownership.
+ */
+export async function getOrderByIdController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const orderId = req.params.orderId;
+
+    if (!orderId) {
+      throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
+    }
+
+    // Extract customer ID
+    // Note: If no customer ID (e.g. admin or guest?), logic might differ.
+    // Spec says "Replace localStorage retrieval with getOrderById(orderNumber)" for Store.
+    // So this is likely for the customer.
+    if (!req.customer) {
+      throw new AppError('UNAUTHORIZED', 'User not authenticated', 401);
+    }
+
+    const customerId = req.customer.id;
+
+    logger.info('Get order by ID request received', {
+      orderId,
+      customerId,
+    });
+
+    // Call service to get order
+    const order = await getOrderById(orderId);
+
+    // Verify ownership
+    if (order.customerId !== customerId) {
+      throw new AppError('FORBIDDEN', 'You do not have permission to view this order', 403);
+    }
+
+    logger.info('Order fetched successfully', {
+      orderId,
+    });
+
+    // Return success response
+    const response = createSuccessResponse(order);
+
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in get order by ID controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error);
+  }
+}
+
+/**
+ * List all orders controller
+ * GET /api/v1/admin/orders
+ * 
+ * Fetches all orders with pagination
+ */
+export async function listOrdersController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+
+    logger.info('List orders request received', { page, limit });
+
+    const result = await getAllOrders(page, limit);
+
+    const response = createSuccessResponse(result);
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in list orders controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error);
+  }
+}

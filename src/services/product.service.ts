@@ -70,3 +70,99 @@ export async function createProduct(input: CreateProductInput) {
   return product;
 }
 
+/**
+ * Add product image input
+ */
+export interface AddProductImageInput {
+  productId: string;
+  imageUrl: string;
+  sortOrder?: number;
+}
+
+/**
+ * Add image to a product
+ */
+export async function addProductImage(input: AddProductImageInput) {
+  logger.info('Adding image to product', { productId: input.productId });
+
+  // Validate that product exists
+  const product = await prisma.product.findUnique({
+    where: { id: input.productId },
+  });
+
+  if (!product) {
+    logger.warn('Add product image failed: product not found', { productId: input.productId });
+    throw new AppError('NOT_FOUND', `Product with id '${input.productId}' not found`, 404);
+  }
+
+  // Create product image
+  const productImage = await prisma.productImage.create({
+    data: {
+      productId: input.productId,
+      imageUrl: input.imageUrl,
+      sortOrder: input.sortOrder ?? 0,
+    },
+  });
+
+  logger.info('Product image added successfully', { productImageId: productImage.id });
+  return productImage;
+}
+
+/**
+ * List products for admin
+ * Returns all products with pagination, without stock/SKU restrictions
+ */
+export async function listProducts(page = 1, limit = 20) {
+  const skip = (page - 1) * limit;
+
+  logger.info('Listing products for admin', { page, limit });
+
+  const total = await prisma.product.count();
+
+  const products = await prisma.product.findMany({
+    skip,
+    take: limit,
+    include: {
+      category: {
+        select: { name: true },
+      },
+      subcategory: {
+        select: { name: true },
+      },
+      images: {
+        take: 1,
+        select: {
+          imageUrl: true,
+        },
+        orderBy: {
+          sortOrder: 'asc',
+        },
+      },
+      _count: {
+        select: { skus: true },
+      },
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  const transformedProducts = products.map((product) => ({
+    ...product,
+    featuredImageUrl: product.images[0]?.imageUrl || null,
+    skuCount: product._count.skus,
+  }));
+
+  const totalPages = Math.ceil(total / limit);
+
+  return {
+    products: transformedProducts,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages,
+    },
+  };
+}
+

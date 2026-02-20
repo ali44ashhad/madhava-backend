@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import * as authService from '../services/auth.service.js';
+import { getCustomerById } from '../services/customer.service.js';
 import { z, ZodError } from 'zod';
 import { AppError } from '../middlewares/error.middleware.js';
 
@@ -109,6 +110,24 @@ export const loginVerifyOtp = async (req: Request, res: Response) => {
         } else {
             console.error('Login Verify OTP error:', error);
             res.status(401).json({ error: 'Verification failed' });
+        }
+    }
+};
+export const getMe = async (req: Request, res: Response) => {
+    try {
+        if (!req.customer?.id) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
+
+        const customer = await getCustomerById(req.customer.id);
+        res.status(200).json(customer);
+    } catch (error) {
+        if (error instanceof AppError) {
+            res.status(error.statusCode).json({ error: error.message });
+        } else {
+            console.error('Get Me error:', error);
+            res.status(500).json({ error: 'Failed to fetch profile' });
         }
     }
 };

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getCategoriesController, getProductsController, getProductDetailController, getSubcategoriesController } from '../controllers/catalog.controller.js';
-import { placeOrderController } from '../controllers/order.controller.js';
+import { placeOrderController, getMyOrdersController, getOrderByIdController } from '../controllers/order.controller.js';
 import { createCustomerController } from '../controllers/customer.controller.js';
 import { createAddressController, getCustomerAddressesController } from '../controllers/address.controller.js';
 import { requestReturnController } from '../controllers/return.controller.js';
@@ -31,6 +31,8 @@ router.get('/addresses', getCustomerAddressesController);
 
 // Orders
 router.post('/orders', placeOrderController);
+router.get('/orders', getMyOrdersController);
+router.get('/orders/:orderId', getOrderByIdController);
 router.post('/orders/:orderItemId/return', requestReturnController);
 
 export default router;

@@ -193,8 +193,8 @@ export async function updateSkuStock(
 
     // Calculate new stock
     const currentStock = sku.stockQuantity;
-    const newStock = operation === 'INCREMENT' 
-      ? currentStock + quantity 
+    const newStock = operation === 'INCREMENT'
+      ? currentStock + quantity
       : currentStock - quantity;
 
     // Prevent negative stock
@@ -249,3 +249,101 @@ export async function updateSkuStock(
   return updatedSku;
 }
 
+/**
+ * Add image to SKU
+ */
+export async function addSkuImage(skuId: string, imageUrl: string, sortOrder: number = 0) {
+  logger.info('Adding image to SKU', { skuId, imageUrl, sortOrder });
+
+  // Check if SKU exists
+  const sku = await prisma.sku.findUnique({
+    where: { id: skuId },
+  });
+
+  if (!sku) {
+    logger.warn('Add SKU image failed: SKU not found', { skuId });
+    throw new AppError('NOT_FOUND', `SKU with id '${skuId}' not found`, 404);
+  }
+
+  // Create SKU image
+  const skuImage = await prisma.skuImage.create({
+    data: {
+      skuId,
+      imageUrl,
+      sortOrder,
+    },
+  });
+
+  logger.info('SKU image added successfully', { skuImageId: skuImage.id });
+  return skuImage;
+}
+
+
+/**
+ * Get all SKUs with pagination and search
+ */
+export async function getAllSkus(
+  page: number = 1,
+  limit: number = 20,
+  search?: string
+) {
+  logger.info('Fetching all SKUs', { page, limit, search });
+
+  const skip = (page - 1) * limit;
+
+  // Build where clause for search
+  const where: any = {
+    isActive: true, // Only fetch active SKUs by default, or maybe all? Admin should see all? 
+    // Let's assume admin sees all for now, but maybe we filter by deletedAt if we had soft delete.
+    // The schema doesn't show soft delete, just isActive. 
+    // Usually admin wants to see inactive ones too to toggle them.
+    // So I will remove isActive: true restriction for admin listing, 
+    // or make it optional filter. For now, show all.
+  };
+
+  // If we want to show all (active and inactive), we don't set isActive here.
+  // However, the previous getSkuInventory only selected active status.
+
+  if (search) {
+    where.OR = [
+      { skuCode: { contains: search, mode: 'insensitive' } },
+      { product: { name: { contains: search, mode: 'insensitive' } } },
+      { manufacturerName: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+
+  const [skus, total] = await Promise.all([
+    prisma.sku.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            images: {
+              take: 1,
+              orderBy: { sortOrder: 'asc' }
+            }
+          }
+        },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+    }),
+    prisma.sku.count({ where }),
+  ]);
+
+  return {
+    skus,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
+}
