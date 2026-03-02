@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma.js';
 import { logger } from '../utils/logger.js';
-import { PaymentStatus, RefundStatus } from '@prisma/client';
-import { PaymentCapturedPayload, RefundProcessedPayload } from './razorpay.webhook.types.js';
+import { PaymentStatus, RefundStatus, OrderStatus } from '@prisma/client';
+import { PaymentCapturedPayload, RefundProcessedPayload, PaymentFailedPayload } from './razorpay.webhook.types.js';
 
 /**
  * Handle 'payment.captured' event
@@ -53,15 +53,102 @@ export async function handlePaymentCaptured(payload: PaymentCapturedPayload): Pr
         return;
     }
 
-    // 3. Update status
-    await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-            status: PaymentStatus.PAID,
-        },
-    });
+    // 3. Update status in a transaction
+    await prisma.$transaction([
+        prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+                status: PaymentStatus.PAID,
+            },
+        }),
+        prisma.order.update({
+            where: { id: payment.orderId },
+            data: {
+                paymentStatus: PaymentStatus.PAID,
+            },
+        })
+    ]);
 
     logger.info('Payment updated to PAID', { id: payment.id, razorpayPaymentId: paymentId });
+}
+
+/**
+ * Handle 'payment.failed' event
+ * Updates Payment status to FAILED and Order status to CANCELLED
+ * Restores stock for all SKUs in the order
+ */
+export async function handlePaymentFailed(payload: PaymentFailedPayload): Promise<void> {
+    const paymentEntity = payload.payment.entity;
+    const paymentId = paymentEntity.id;
+    const razorpayOrderId = paymentEntity.order_id;
+    const errorDescription = paymentEntity.error_description || paymentEntity.error_reason || 'Payment failed';
+
+    logger.info('Handling payment.failed', { paymentId, razorpayOrderId, errorDescription });
+
+    const payment = await prisma.payment.findFirst({
+        where: {
+            reference: razorpayOrderId,
+            order: {
+                paymentStatus: {
+                    in: [PaymentStatus.PENDING, PaymentStatus.FAILED]
+                }
+            }
+        },
+        include: { order: true }
+    });
+
+    if (!payment) {
+        logger.warn('Pending Payment record not found for failed webhook event', { razorpayOrderId, paymentId });
+        return;
+    }
+
+    if (payment.status === PaymentStatus.FAILED && payment.order.status === OrderStatus.CANCELLED) {
+        logger.info('Payment already marked as FAILED and Order CANCELLED, ignoring event', { id: payment.id });
+        return;
+    }
+
+    // We only restore stock if the order wasn't ALREADY cancelled
+    // (In case another webhook or admin already cancelled it)
+    const shouldRestoreStock = payment.order.status !== OrderStatus.CANCELLED;
+
+    // Get order items to restore stock
+    const orderItems = shouldRestoreStock ? await prisma.orderItem.findMany({
+        where: { orderId: payment.orderId },
+        select: { skuId: true, quantity: true }
+    }) : [];
+
+    await prisma.$transaction(async (tx) => {
+        // 1. Mark payment as failed
+        await tx.payment.update({
+            where: { id: payment.id },
+            data: { status: PaymentStatus.FAILED }
+        });
+
+        // 2. Mark order as cancelled and payment failed
+        await tx.order.update({
+            where: { id: payment.orderId },
+            data: {
+                status: OrderStatus.CANCELLED,
+                paymentStatus: PaymentStatus.FAILED,
+                cancelledAt: new Date()
+            }
+        });
+
+        // 3. Restore stock if needed
+        if (shouldRestoreStock && orderItems.length > 0) {
+            for (const item of orderItems) {
+                await tx.sku.update({
+                    where: { id: item.skuId },
+                    data: {
+                        stockQuantity: { increment: item.quantity }
+                    }
+                });
+            }
+            logger.info('Stock restored for failed payment', { orderId: payment.orderId, itemsCount: orderItems.length });
+        }
+    });
+
+    logger.info('Payment updated to FAILED and Order CANCELLED', { id: payment.id, razorpayPaymentId: paymentId });
 }
 
 /**

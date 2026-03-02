@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { createSubcategory, listSubcategories, CreateSubcategoryInput } from '../services/subcategory.service.js';
+import { createSubcategory, listSubcategories, updateSubcategory, CreateSubcategoryInput } from '../services/subcategory.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -86,6 +86,60 @@ export async function listSubcategoriesController(
     res.status(200).json(response);
   } catch (error) {
     logger.error('Error in list subcategories controller', error);
+    next(error);
+  }
+}
+
+/**
+ * Zod schema for update subcategory request body
+ */
+const updateSubcategorySchema = z.object({
+  name: z.string().min(1, 'Name cannot be empty').optional(),
+  categoryId: z.string().uuid('Invalid category ID format').optional(),
+  imageUrl: z.string().url('Invalid image URL').optional().or(z.literal('')),
+  isActive: z.boolean().optional(),
+});
+
+/**
+ * Update subcategory controller
+ * PUT /api/v1/admin/subcategories/:id
+ */
+export async function updateSubcategoryController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    logger.info('Update subcategory request received', { subcategoryId: id });
+
+    // Validate parameter
+    if (!id) {
+      throw new AppError('VALIDATION_ERROR', 'Subcategory ID is required', 400);
+    }
+
+    // Validate request body
+    const validationResult = updateSubcategorySchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    // Ensure slug is not provided
+    if (req.body.slug) {
+      throw new AppError('VALIDATION_ERROR', 'Slug cannot be provided manually.', 400);
+    }
+
+    const { name, categoryId, imageUrl, isActive } = validationResult.data;
+
+    // Call service to update subcategory
+    const subcategory = await updateSubcategory(id, { name, categoryId, imageUrl, isActive });
+
+    // Return success response
+    const response = createSuccessResponse(subcategory);
+    res.status(200).json(response);
+  } catch (error) {
+    logger.error('Error in update subcategory controller', error);
     next(error);
   }
 }

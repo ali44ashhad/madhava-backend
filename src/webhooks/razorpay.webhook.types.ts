@@ -67,13 +67,28 @@ export interface RefundProcessedPayload {
 }
 
 /**
+ * Payment Failed Payload
+ */
+export interface PaymentFailedPayload {
+    payment: {
+        entity: RazorpayPaymentEntity & {
+            error_code: string;
+            error_description: string;
+            error_source: string;
+            error_step: string;
+            error_reason: string;
+        };
+    };
+}
+
+/**
  * Main Webhook Event structure
  */
 export interface RazorpayWebhookEvent {
     entity: string;
     account_id: string;
-    event: 'payment.captured' | 'refund.processed' | string;
+    event: 'payment.captured' | 'payment.failed' | 'refund.processed' | string;
     contains: string[];
-    payload: PaymentCapturedPayload | RefundProcessedPayload | any;
+    payload: PaymentCapturedPayload | PaymentFailedPayload | RefundProcessedPayload | any;
     created_at: number;
 }

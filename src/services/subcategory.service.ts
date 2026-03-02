@@ -151,3 +151,103 @@ export async function getSubcategoriesByCategorySlug(categorySlug: string) {
   return subcategories;
 }
 
+/**
+ * Update subcategory input
+ */
+export interface UpdateSubcategoryInput {
+  name?: string;
+  categoryId?: string;
+  imageUrl?: string;
+  isActive?: boolean;
+}
+
+/**
+ * Update an existing subcategory
+ */
+export async function updateSubcategory(id: string, input: UpdateSubcategoryInput) {
+  logger.info('Updating subcategory', { subcategoryId: id, input });
+
+  // Validate subcategory exists
+  const subcategory = await prisma.subcategory.findUnique({
+    where: { id },
+  });
+
+  if (!subcategory) {
+    logger.warn('Subcategory update failed: not found', { subcategoryId: id });
+    throw new AppError('NOT_FOUND', `Subcategory with id '${id}' not found`, 404);
+  }
+
+  const targetCategoryId = input.categoryId || subcategory.categoryId;
+
+  // If category is being changed, validate new category
+  if (input.categoryId && input.categoryId !== subcategory.categoryId) {
+    const category = await prisma.category.findUnique({
+      where: { id: input.categoryId },
+    });
+
+    if (!category) {
+      logger.warn('Subcategory update failed: target category not found', { categoryId: input.categoryId });
+      throw new AppError('NOT_FOUND', `Category with id '${input.categoryId}' not found`, 404);
+    }
+
+    if (!category.isActive) {
+      logger.warn('Subcategory update failed: target category is not active', { categoryId: input.categoryId });
+      throw new AppError('BAD_REQUEST', `Category with id '${input.categoryId}' is not active`, 400);
+    }
+  }
+
+  // If name or category is being updated, check for duplicates and update slug
+  let slug = subcategory.slug;
+  if ((input.name && input.name !== subcategory.name) || (input.categoryId && input.categoryId !== subcategory.categoryId)) {
+    const newName = input.name || subcategory.name;
+
+    const existingSubcategory = await prisma.subcategory.findFirst({
+      where: {
+        categoryId: targetCategoryId,
+        name: newName,
+        id: { not: id }, // Exclude current subcategory
+      },
+    });
+
+    if (existingSubcategory) {
+      logger.warn('Subcategory update failed: duplicate name under same category', {
+        subcategoryId: id,
+        name: newName,
+        categoryId: targetCategoryId,
+      });
+      throw new AppError(
+        'VALIDATION_ERROR',
+        `Subcategory with name '${newName}' already exists under this category`,
+        400
+      );
+    }
+
+    // Only regenerate slug if name changed
+    if (input.name && input.name !== subcategory.name) {
+      slug = await generateUniqueSubcategorySlug(newName, targetCategoryId);
+    }
+  }
+
+  const updatedSubcategory = await prisma.subcategory.update({
+    where: { id },
+    data: {
+      name: input.name,
+      slug,
+      categoryId: input.categoryId,
+      imageUrl: input.imageUrl !== undefined ? (input.imageUrl || null) : undefined,
+      isActive: input.isActive,
+    },
+    include: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  });
+
+  logger.info('Subcategory updated successfully', { subcategoryId: id });
+  return updatedSubcategory;
+}
+

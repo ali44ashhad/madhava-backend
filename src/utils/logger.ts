@@ -1,4 +1,4 @@
-import { env } from '../config/index.js';
+import { env } from '../config/env.js';
 
 /**
  * Log levels

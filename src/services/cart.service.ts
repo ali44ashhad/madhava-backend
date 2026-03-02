@@ -41,10 +41,9 @@ export const getCartService = async (customerId: string): Promise<CartResponse> 
         skuId: item.skuId,
         quantity: item.quantity,
         productName: item.sku.product.name,
-        // Fallback to product image if SKU has none (SKU images in separate table? Let's check schema again)
-        // Schema has SkuImage. Let's include that too.
+        // Fallback to product image if SKU has none
         image: item.sku.product.images[0]?.imageUrl || '',
-        sellingPrice: Number(item.sku.sellingPrice),
+        sellingPrice: Number(item.sku.festivePrice ?? item.sku.sellingPrice),
         skuAttributes: {
             size: item.sku.size,
             color: item.sku.color,

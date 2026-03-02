@@ -173,31 +173,52 @@ export async function requestReturn(
  * - return reason
  * - return images
  */
-export async function listReturnRequests(status?: ReturnStatus) {
-  logger.info('List return requests', { status });
+export async function listReturnRequests(status?: ReturnStatus, search?: string, page: number = 1, limit: number = 20) {
+  logger.info('List return requests', { status, search, page, limit });
 
-  const returns = await prisma.return.findMany({
-    where: status ? { status } : undefined,
-    include: {
-      orderItem: {
-        include: {
-          order: {
-            include: {
-              customer: true,
+  const whereClause: any = {};
+
+  if (status) {
+    whereClause.status = status;
+  }
+
+  if (search) {
+    whereClause.OR = [
+      { orderItem: { order: { orderNumber: { contains: search, mode: 'insensitive' } } } },
+      { orderItem: { order: { customer: { email: { contains: search, mode: 'insensitive' } } } } },
+      { orderItem: { order: { customer: { name: { contains: search, mode: 'insensitive' } } } } }
+    ];
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [returns, total] = await Promise.all([
+    prisma.return.findMany({
+      where: whereClause,
+      skip,
+      take: limit,
+      include: {
+        orderItem: {
+          include: {
+            order: {
+              include: {
+                customer: true,
+              },
             },
+            sku: true,
           },
-          sku: true,
         },
+        images: true,
       },
-      images: true,
-    },
-    orderBy: {
-      requestedAt: 'desc',
-    },
-  });
+      orderBy: {
+        requestedAt: 'desc',
+      },
+    }),
+    prisma.return.count({ where: whereClause })
+  ]);
 
   // Transform to response format
-  return returns.map((returnRecord) => ({
+  const mappedReturns = returns.map((returnRecord) => ({
     id: returnRecord.id,
     status: returnRecord.status,
     reason: returnRecord.reason,
@@ -206,6 +227,7 @@ export async function listReturnRequests(status?: ReturnStatus) {
     reviewedAt: returnRecord.reviewedAt,
     orderNumber: returnRecord.orderItem.order.orderNumber,
     orderId: returnRecord.orderItem.order.id,
+    quantity: returnRecord.orderItem.quantity,
     customer: {
       id: returnRecord.orderItem.order.customer.id,
       name: returnRecord.orderItem.order.customer.name,
@@ -222,6 +244,8 @@ export async function listReturnRequests(status?: ReturnStatus) {
       imageUrl: img.imageUrl,
     })),
   }));
+
+  return { returns: mappedReturns, total };
 }
 
 /**

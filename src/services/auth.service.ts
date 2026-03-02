@@ -82,6 +82,8 @@ export const loginRequestOtp = async (phone: string): Promise<void> => {
     // 3. Send SMS
     const smsPhone = formatPhoneForSms(cleanPhone);
     await smsService.sendSms(smsPhone, `Your login verification code is: ${otp}`);
+    console.log('OTP sent to:', smsPhone);
+
 };
 
 export const loginVerifyOtp = async (phone: string, otp: string) => {

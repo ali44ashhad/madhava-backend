@@ -257,13 +257,14 @@ export async function listSkusController(
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 20;
     const search = req.query.search as string;
+    const stock = req.query.stock as string;
 
-    logger.info('List SKUs request received', { page, limit, search });
+    logger.info('List SKUs request received', { page, limit, search, stock });
 
     // Call service to get SKUs
     // Dynamic import to avoid top-level import issues if I can't easily edit top of file
     const { getAllSkus } = await import('../services/sku.service.js');
-    const result = await getAllSkus(page, limit, search);
+    const result = await getAllSkus(page, limit, search, stock);
 
     // Return success response
     const response = createSuccessResponse(result);

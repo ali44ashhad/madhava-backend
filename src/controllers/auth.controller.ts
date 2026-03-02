@@ -150,7 +150,7 @@ export const refresh = async (req: Request, res: Response) => {
     try {
         const refreshToken = req.cookies?.refreshToken;
         if (!refreshToken) {
-            res.status(401).json({ error: 'Refresh token missing' });
+            res.status(200).json({ accessToken: null });
             return;
         }
 
@@ -161,8 +161,9 @@ export const refresh = async (req: Request, res: Response) => {
         res.status(200).json({ accessToken: result.newAccessToken });
 
     } catch (error) {
-        console.error('Refresh token error:', error);
-        res.status(401).json({ error: 'Failed to refresh token' });
+        // Clear invalid or expired cookie
+        res.clearCookie('refreshToken');
+        res.status(200).json({ accessToken: null });
     }
 };
 

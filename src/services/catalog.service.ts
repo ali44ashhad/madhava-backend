@@ -239,6 +239,15 @@ export async function getProductDetail(productId: string) {
           gstPercent: true,
           stockQuantity: true,
           isCodAllowed: true,
+          images: {
+            orderBy: {
+              sortOrder: 'asc',
+            },
+            select: {
+              id: true,
+              imageUrl: true,
+            },
+          },
         },
         orderBy: {
           createdAt: 'asc',

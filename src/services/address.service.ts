@@ -125,3 +125,143 @@ export async function getCustomerAddresses(customerId: string): Promise<Address[
   return addresses;
 }
 
+/**
+ * Update address input
+ */
+export interface UpdateAddressInput {
+  addressId: string;
+  customerId: string;
+  name?: string;
+  phone?: string;
+  line1?: string;
+  line2?: string | null;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  isDefault?: boolean;
+}
+
+/**
+ * Update address result
+ */
+export interface UpdateAddressResult {
+  addressId: string;
+}
+
+/**
+ * Update address service
+ * Handles address update with ownership validation
+ */
+export async function updateAddress(input: UpdateAddressInput): Promise<UpdateAddressResult> {
+  logger.info('Updating address', {
+    addressId: input.addressId,
+    customerId: input.customerId,
+  });
+
+  // Verify address exists and belongs to customer
+  const existingAddress = await prisma.address.findFirst({
+    where: {
+      id: input.addressId,
+      customerId: input.customerId
+    },
+  });
+
+  if (!existingAddress) {
+    throw new AppError('NOT_FOUND', `Address not found or does not belong to the user`, 404);
+  }
+
+  // Handle setting as default
+  if (input.isDefault === true && !existingAddress.isDefault) {
+    // Unset current default
+    await prisma.address.updateMany({
+      where: {
+        customerId: input.customerId,
+        isDefault: true,
+      },
+      data: {
+        isDefault: false,
+      },
+    });
+  }
+
+  // Update address
+  const updatedAddress = await prisma.address.update({
+    where: { id: input.addressId },
+    data: {
+      name: input.name?.trim(),
+      phone: input.phone?.trim(),
+      line1: input.line1?.trim(),
+      line2: input.line2?.trim() !== undefined ? input.line2?.trim() || null : undefined,
+      city: input.city?.trim(),
+      state: input.state?.trim(),
+      pincode: input.pincode?.trim(),
+      isDefault: input.isDefault,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  logger.info('Address updated successfully', {
+    addressId: updatedAddress.id,
+    customerId: input.customerId,
+  });
+
+  return {
+    addressId: updatedAddress.id,
+  };
+}
+
+/**
+ * Delete address service
+ * Handles address deletion with ownership validation
+ */
+export async function deleteAddress(addressId: string, customerId: string): Promise<void> {
+  logger.info('Deleting address', {
+    addressId,
+    customerId,
+  });
+
+  // Verify address exists and belongs to customer
+  const existingAddress = await prisma.address.findFirst({
+    where: {
+      id: addressId,
+      customerId,
+    },
+  });
+
+  if (!existingAddress) {
+    throw new AppError('NOT_FOUND', `Address not found or does not belong to the user`, 404);
+  }
+
+  // Delete the address
+  await prisma.address.delete({
+    where: { id: addressId },
+  });
+
+  // If the deleted address was the default, make another address the default (if any exist)
+  if (existingAddress.isDefault) {
+    const fallbackAddress = await prisma.address.findFirst({
+      where: { customerId },
+      orderBy: { id: 'asc' }, // Get the oldest remaining address
+    });
+
+    if (fallbackAddress) {
+      await prisma.address.update({
+        where: { id: fallbackAddress.id },
+        data: { isDefault: true },
+      });
+
+      logger.info('Fallback default address set', {
+        newDefaultAddressId: fallbackAddress.id,
+        customerId,
+      });
+    }
+  }
+
+  logger.info('Address deleted successfully', {
+    addressId,
+    customerId,
+  });
+}
+

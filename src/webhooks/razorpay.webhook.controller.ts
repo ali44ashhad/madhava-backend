@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
-import { handlePaymentCaptured, handleRefundProcessed } from './razorpay.webhook.service.js';
+import { handlePaymentCaptured, handleRefundProcessed, handlePaymentFailed } from './razorpay.webhook.service.js';
 import { RazorpayWebhookEvent } from './razorpay.webhook.types.js';
 
 /**
@@ -77,6 +77,9 @@ export const razorpayWebhookController = async (req: Request, res: Response) => 
         switch (eventType) {
             case 'payment.captured':
                 await handlePaymentCaptured(event.payload);
+                break;
+            case 'payment.failed':
+                await handlePaymentFailed(event.payload);
                 break;
             case 'refund.processed':
                 await handleRefundProcessed(event.payload);

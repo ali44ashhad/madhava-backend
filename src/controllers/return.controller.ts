@@ -139,22 +139,38 @@ export async function listReturnRequestsController(
     }
 
     const { status } = validationResult.data;
+    const search = req.query.search as string | undefined;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
 
     logger.info('List return requests request received', {
       adminId: req.admin.id,
       status,
+      search,
+      page,
+      limit,
     });
 
     // Call service to list return requests
-    const returns = await listReturnRequests(status);
+    const dbResult = await listReturnRequests(status, search, page, limit);
+
+    const result = {
+      returns: dbResult.returns,
+      pagination: {
+        total: dbResult.total,
+        page,
+        limit,
+        totalPages: Math.ceil(dbResult.total / limit),
+      },
+    };
 
     logger.info('Return requests fetched successfully', {
       adminId: req.admin.id,
-      count: returns.length,
+      count: dbResult.returns.length,
     });
 
     // Return success response
-    const response = createSuccessResponse(returns);
+    const response = createSuccessResponse(result);
 
     res.status(200).json(response);
     return;

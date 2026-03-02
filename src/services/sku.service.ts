@@ -285,7 +285,8 @@ export async function addSkuImage(skuId: string, imageUrl: string, sortOrder: nu
 export async function getAllSkus(
   page: number = 1,
   limit: number = 20,
-  search?: string
+  search?: string,
+  stock?: string
 ) {
   logger.info('Fetching all SKUs', { page, limit, search });
 
@@ -310,6 +311,16 @@ export async function getAllSkus(
       { product: { name: { contains: search, mode: 'insensitive' } } },
       { manufacturerName: { contains: search, mode: 'insensitive' } },
     ];
+  }
+
+  if (stock) {
+    if (stock === 'out_of_stock') {
+      where.stockQuantity = { lte: 0 };
+    } else if (stock === 'low') {
+      where.stockQuantity = { gt: 0, lte: 10 };
+    } else if (stock === 'in_stock') {
+      where.stockQuantity = { gt: 10 };
+    }
   }
 
   const [skus, total] = await Promise.all([

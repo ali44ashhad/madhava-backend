@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { createAddress, getCustomerAddresses } from '../services/address.service.js';
+import { createAddress, getCustomerAddresses, updateAddress, deleteAddress } from '../services/address.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -24,6 +24,29 @@ const createAddressSchema = z.object({
     .min(5, 'Pincode must be at least 5 characters')
     .max(10, 'Pincode must be at most 10 characters')
     .trim(),
+});
+
+/**
+ * Zod schema for update address request body
+ */
+const updateAddressSchema = z.object({
+  name: z.string().min(1, 'Name cannot be empty').trim().optional(),
+  phone: z
+    .string()
+    .regex(/^\+?[0-9]{10,15}$/, 'Phone must be 10-15 digits')
+    .trim()
+    .optional(),
+  line1: z.string().min(1, 'Line 1 cannot be empty').trim().optional(),
+  line2: z.string().trim().nullable().optional(),
+  city: z.string().min(1, 'City cannot be empty').trim().optional(),
+  state: z.string().min(1, 'State cannot be empty').trim().optional(),
+  pincode: z
+    .string()
+    .min(5, 'Pincode must be at least 5 characters')
+    .max(10, 'Pincode must be at most 10 characters')
+    .trim()
+    .optional(),
+  isDefault: z.boolean().optional(),
 });
 
 /**
@@ -147,3 +170,113 @@ export async function getCustomerAddressesController(
   }
 }
 
+/**
+ * Update address controller
+ * PUT /api/v1/store/addresses/:addressId
+ * 
+ * Validates request body and calls address service to update address
+ */
+export async function updateAddressController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { addressId } = req.params;
+    // For protected routes, the customerId must come from the authenticated user (req.user)
+    const customerId = (req as any).user?.id || (req as any).customer?.id;
+
+    if (!customerId) {
+      throw new AppError('UNAUTHORIZED', 'Customer not authenticated', 401);
+    }
+
+    logger.info('Update address request received', {
+      addressId,
+      customerId,
+    });
+
+    // Validate request body
+    const validationResult = updateAddressSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    logger.info('Validation passed, calling update address service', {
+      addressId,
+    });
+
+    // Call service to update address
+    const result = await updateAddress({
+      addressId,
+      customerId,
+      ...validationResult.data,
+    });
+
+    logger.info('Address updated successfully', {
+      addressId: result.addressId,
+    });
+
+    // Return success response
+    const response = createSuccessResponse({
+      addressId: result.addressId,
+    });
+
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in update address controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error); // Pass error to error middleware
+  }
+}
+
+/**
+ * Delete address controller
+ * DELETE /api/v1/store/addresses/:addressId
+ * 
+ * Deletes an address for the authenticated customer
+ */
+export async function deleteAddressController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { addressId } = req.params;
+    // For protected routes, the customerId must come from the authenticated user (req.user)
+    const customerId = (req as any).user?.id || (req as any).customer?.id;
+
+    if (!customerId) {
+      throw new AppError('UNAUTHORIZED', 'Customer not authenticated', 401);
+    }
+
+    logger.info('Delete address request received', {
+      addressId,
+      customerId,
+    });
+
+    // Call service to delete address
+    await deleteAddress(addressId, customerId);
+
+    logger.info('Address deleted successfully', {
+      addressId,
+    });
+
+    // Return success response
+    const response = createSuccessResponse({
+      message: 'Address deleted successfully'
+    });
+
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in delete address controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error); // Pass error to error middleware
+  }
+}

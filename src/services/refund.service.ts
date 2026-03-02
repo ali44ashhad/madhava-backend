@@ -78,6 +78,15 @@ export async function initiateRefund(orderId: string, adminId: string): Promise<
     );
   }
 
+  // Validate payment was actually captured (prevent refunding unpaid/abandoned orders)
+  if (order.paymentStatus !== PaymentStatus.PAID) {
+    throw new AppError(
+      'INVALID_STATE',
+      `Refund can only be initiated when payment has been captured. Current payment status: ${order.paymentStatus}`,
+      400
+    );
+  }
+
   // Validate no existing refund
   if (order.refunds.length > 0) {
     throw new AppError(

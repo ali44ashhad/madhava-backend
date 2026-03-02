@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { placeOrder, approveOrder, putOrderOnHold, cancelOrder, markOrderAsShipped, markOrderAsDelivered, getOrderDetailsForEmail, getCustomerOrders, getOrderById, getAllOrders } from '../services/order.service.js';
+import { placeOrder, approveOrder, putOrderOnHold, cancelOrder, cancelMyOrder, markOrderAsShipped, markOrderAsDelivered, getOrderDetailsForEmail, getCustomerOrders, getOrderById, getAllOrders, cleanupStalePendingOrders } from '../services/order.service.js';
 import { emailService } from '../emails/email.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
@@ -38,19 +38,26 @@ export async function placeOrderController(
   next: NextFunction
 ): Promise<void> {
   try {
+    // customerAuthMiddleware guarantees req.customer is set
+    if (!req.customer) {
+      throw new AppError('UNAUTHORIZED', 'Authentication required to place an order', 401);
+    }
+
     logger.info('Place order request received', {
-      customerId: req.body?.customerId,
+      customerId: req.customer.id,
       itemCount: req.body?.items?.length,
     });
 
-    // Validate request body
-    const validationResult = placeOrderSchema.safeParse(req.body);
+    // Validate request body (customerId now comes from authenticated JWT, not body)
+    const placeOrderBodySchema = placeOrderSchema.omit({ customerId: true });
+    const validationResult = placeOrderBodySchema.safeParse(req.body);
     if (!validationResult.success) {
       const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
       throw new AppError('VALIDATION_ERROR', errorMessages, 400);
     }
 
-    const { customerId, addressId, paymentMethod, paymentReference, items } = validationResult.data;
+    const { addressId, paymentMethod, paymentReference, items } = validationResult.data;
+    const customerId = req.customer.id;
 
     logger.info('Validation passed, calling place order service', {
       customerId,
@@ -78,6 +85,7 @@ export async function placeOrderController(
       orderId: result.orderId,
       orderNumber: result.orderNumber,
       status: result.status,
+      razorpayOrderId: result.razorpayOrderId,
     });
 
     res.status(201).json(response);
@@ -613,16 +621,132 @@ export async function listOrdersController(
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
+    const search = req.query.search as string | undefined;
+    const status = req.query.status as string | undefined;
 
-    logger.info('List orders request received', { page, limit });
+    logger.info('List orders request received', { page, limit, search, status });
 
-    const result = await getAllOrders(page, limit);
+    const result = await getAllOrders(page, limit, search, status);
 
     const response = createSuccessResponse(result);
     res.status(200).json(response);
     return;
   } catch (error) {
     logger.error('Error in list orders controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error);
+  }
+}
+
+/**
+ * Cleanup stale orders controller
+ * POST /api/v1/admin/orders/cleanup-stale
+ * 
+ * Cleans up pending Razorpay orders older than given minutes (default 60)
+ */
+export async function cleanupStaleOrdersController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const minutesOld = parseInt(req.body.minutesOld as string) || 60;
+
+    // Extract admin ID (set by adminAuth middleware)
+    if (!req.admin) {
+      throw new AppError('UNAUTHORIZED', 'Admin information not found', 401);
+    }
+
+    logger.info('Cleanup stale orders request received', {
+      adminId: req.admin.id,
+      minutesOld
+    });
+
+    const result = await cleanupStalePendingOrders(minutesOld, req.admin.id);
+
+    const response = createSuccessResponse({
+      message: `Cleaned up ${result.cancelledCount} stale order(s) successfully`,
+      cancelledCount: result.cancelledCount,
+    });
+
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in cleanup stale orders controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error);
+  }
+}
+
+/**
+ * Cancel own order controller (for customers)
+ * POST /api/v1/store/orders/:orderId/cancel
+ * 
+ * Validates orderId param and request body, then calls cancelMyOrder service
+ */
+export async function cancelMyOrderController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const orderId = req.params.orderId;
+
+    if (!orderId) {
+      throw new AppError('VALIDATION_ERROR', 'Order ID is required', 400);
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(orderId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid order ID format', 400);
+    }
+
+    // Validate request body
+    const validationResult = cancelOrderSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    const { reason } = validationResult.data;
+
+    // Extract customer ID (set by auth middleware)
+    if (!req.customer) { // Assuming auth middleware sets req.customer
+      throw new AppError('UNAUTHORIZED', 'User not authenticated', 401);
+    }
+
+    const customerId = req.customer.id;
+
+    logger.info('Customer cancel order request received', {
+      orderId,
+      customerId,
+      reason,
+    });
+
+    // Call service to cancel order
+    await cancelMyOrder(orderId, customerId, reason);
+
+    logger.info('Customer order cancelled successfully', {
+      orderId,
+      customerId,
+    });
+
+    // Return success response
+    const response = createSuccessResponse({
+      message: 'Order cancelled successfully',
+      orderId,
+    });
+
+    res.status(200).json(response);
+
+    return;
+  } catch (error) {
+    logger.error('Error in customer cancel order controller', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });

@@ -80,7 +80,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetricsResponse> {
             where: {
                 stockQuantity: {
                     gt: 0,
-                    lte: 5
+                    lte: 10
                 }
             }
         }),
