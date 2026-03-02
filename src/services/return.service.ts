@@ -132,19 +132,10 @@ export async function requestReturn(
       })),
     });
 
-    // Update order status to RETURN_REQUESTED
-    await tx.order.update({
-      where: { id: orderItem.order.id },
-      data: {
-        status: OrderStatus.RETURN_REQUESTED,
-      },
-    });
-
-    logger.info('Return created and order status updated', {
+    logger.info('Return created', {
       returnId: returnRecord.id,
       orderId: orderItem.order.id,
       previousStatus: OrderStatus.DELIVERED,
-      newStatus: OrderStatus.RETURN_REQUESTED,
     });
 
     return {
@@ -297,15 +288,6 @@ export async function approveReturn(returnId: string, adminId: string): Promise<
     );
   }
 
-  // Validate order status is RETURN_REQUESTED
-  if (returnRecord.orderItem.order.status !== OrderStatus.RETURN_REQUESTED) {
-    throw new AppError(
-      'INVALID_STATE',
-      `Cannot approve return. Order status must be RETURN_REQUESTED. Current status: ${returnRecord.orderItem.order.status}`,
-      400
-    );
-  }
-
   // Execute approval in transaction
   await prisma.$transaction(async (tx) => {
     // Update return status and reviewedAt
@@ -317,23 +299,13 @@ export async function approveReturn(returnId: string, adminId: string): Promise<
       },
     });
 
-    // Update order status to RETURN_APPROVED
-    await tx.order.update({
-      where: { id: returnRecord.orderItem.order.id },
-      data: {
-        status: OrderStatus.RETURN_APPROVED,
-      },
-    });
-
-    logger.info('Return approved and order status updated', {
+    logger.info('Return approved', {
       returnId,
       orderId: returnRecord.orderItem.order.id,
       orderNumber: returnRecord.orderItem.order.orderNumber,
       adminId,
       previousReturnStatus: ReturnStatus.REQUESTED,
       newReturnStatus: ReturnStatus.APPROVED,
-      previousOrderStatus: OrderStatus.RETURN_REQUESTED,
-      newOrderStatus: OrderStatus.RETURN_APPROVED,
     });
   });
 
@@ -342,6 +314,80 @@ export async function approveReturn(returnId: string, adminId: string): Promise<
     orderId: returnRecord.orderItem.order.id,
     adminId,
     action: 'APPROVE_RETURN',
+  });
+}
+
+/**
+ * Mark return received service
+ * Marks an approved return as received at the warehouse
+ * 
+ * Validations:
+ * - Return must exist
+ * - Return status must be APPROVED
+ * 
+ * Behavior:
+ * - Updates return status to RECEIVED
+ * - Logs admin action
+ */
+export async function markReturnReceived(returnId: string, adminId: string): Promise<void> {
+  logger.info('Mark return received request', { returnId, adminId });
+
+  // Fetch return with order
+  const returnRecord = await prisma.return.findUnique({
+    where: { id: returnId },
+    include: {
+      orderItem: {
+        include: {
+          order: {
+            select: {
+              id: true,
+              status: true,
+              orderNumber: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!returnRecord) {
+    throw new AppError('NOT_FOUND', `Return with id '${returnId}' not found`, 404);
+  }
+
+  // Validate return status is APPROVED
+  if (returnRecord.status !== ReturnStatus.APPROVED) {
+    throw new AppError(
+      'INVALID_STATE',
+      `Cannot mark return as received. Current status: ${returnRecord.status}. Expected: APPROVED`,
+      400
+    );
+  }
+
+  // Execute in transaction
+  await prisma.$transaction(async (tx) => {
+    // Update return status
+    await tx.return.update({
+      where: { id: returnId },
+      data: {
+        status: ReturnStatus.RECEIVED,
+      },
+    });
+
+    logger.info('Return marked as received', {
+      returnId,
+      orderId: returnRecord.orderItem.order.id,
+      orderNumber: returnRecord.orderItem.order.orderNumber,
+      adminId,
+      previousReturnStatus: ReturnStatus.APPROVED,
+      newReturnStatus: ReturnStatus.RECEIVED,
+    });
+  });
+
+  logger.info('Return received successfully', {
+    returnId,
+    orderId: returnRecord.orderItem.order.id,
+    adminId,
+    action: 'MARK_RETURN_RECEIVED',
   });
 }
 
@@ -395,15 +441,6 @@ export async function rejectReturn(returnId: string, adminId: string, reason: st
     );
   }
 
-  // Validate order status is RETURN_REQUESTED
-  if (returnRecord.orderItem.order.status !== OrderStatus.RETURN_REQUESTED) {
-    throw new AppError(
-      'INVALID_STATE',
-      `Cannot reject return. Order status must be RETURN_REQUESTED. Current status: ${returnRecord.orderItem.order.status}`,
-      400
-    );
-  }
-
   // Execute rejection in transaction
   await prisma.$transaction(async (tx) => {
     // Update return status and reviewedAt
@@ -415,15 +452,7 @@ export async function rejectReturn(returnId: string, adminId: string, reason: st
       },
     });
 
-    // Update order status to RETURN_REJECTED
-    await tx.order.update({
-      where: { id: returnRecord.orderItem.order.id },
-      data: {
-        status: OrderStatus.RETURN_REJECTED,
-      },
-    });
-
-    logger.info('Return rejected and order status updated', {
+    logger.info('Return rejected', {
       returnId,
       orderId: returnRecord.orderItem.order.id,
       orderNumber: returnRecord.orderItem.order.orderNumber,
@@ -431,8 +460,6 @@ export async function rejectReturn(returnId: string, adminId: string, reason: st
       rejectionReason: reason,
       previousReturnStatus: ReturnStatus.REQUESTED,
       newReturnStatus: ReturnStatus.REJECTED,
-      previousOrderStatus: OrderStatus.RETURN_REQUESTED,
-      newOrderStatus: OrderStatus.RETURN_REJECTED,
     });
   });
 

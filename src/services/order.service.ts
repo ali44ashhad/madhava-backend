@@ -860,6 +860,7 @@ export async function getCustomerOrders(customerId: string) {
       orderItems: {
         include: {
           sku: true,
+          return: true,
         }
       },
       payments: true,
@@ -882,6 +883,7 @@ export async function getOrderById(orderId: string) {
       orderItems: {
         include: {
           sku: true,
+          return: true,
         }
       },
       payments: true,
@@ -935,6 +937,7 @@ export async function getAllOrders(page: number = 1, limit: number = 20, search?
         orderItems: {
           include: {
             sku: true,
+            return: true,
           }
         },
         payments: true,

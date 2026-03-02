@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { requestReturn, listReturnRequests, approveReturn, rejectReturn, getReturnDetailsForEmail } from '../services/return.service.js';
+import { requestReturn, listReturnRequests, approveReturn, rejectReturn, getReturnDetailsForEmail, markReturnReceived } from '../services/return.service.js';
 import { emailService } from '../emails/email.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
@@ -26,7 +26,7 @@ const rejectReturnSchema = z.object({
  * Zod schema for list returns query params
  */
 const listReturnsQuerySchema = z.object({
-  status: z.enum(['REQUESTED', 'APPROVED', 'REJECTED']).optional(),
+  status: z.enum(['REQUESTED', 'APPROVED', 'RECEIVED', 'REFUNDED', 'REJECTED']).optional(),
 });
 
 /**
@@ -251,6 +251,65 @@ export async function approveReturnController(
     return;
   } catch (error) {
     logger.error('Error in approve return controller', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return next(error);
+  }
+}
+
+/**
+ * Mark return received controller
+ * POST /api/v1/admin/returns/:returnId/receive
+ * 
+ * Validates returnId param and calls markReturnReceived service
+ */
+export async function markReturnReceivedController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const returnId = req.params.returnId;
+
+    if (!returnId) {
+      throw new AppError('VALIDATION_ERROR', 'Return ID is required', 400);
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(returnId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid return ID format', 400);
+    }
+
+    // Extract admin ID (set by adminAuth middleware)
+    if (!req.admin) {
+      throw new AppError('UNAUTHORIZED', 'Admin information not found', 401);
+    }
+
+    logger.info('Mark return received request received', {
+      returnId,
+      adminId: req.admin.id,
+    });
+
+    // Call service to mark return received
+    await markReturnReceived(returnId, req.admin.id);
+
+    logger.info('Return marked as received successfully', {
+      returnId,
+      adminId: req.admin.id,
+    });
+
+    // Return success response
+    const response = createSuccessResponse({
+      message: 'Return marked as received successfully',
+      returnId,
+    });
+
+    res.status(200).json(response);
+    return;
+  } catch (error) {
+    logger.error('Error in mark return received controller', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });

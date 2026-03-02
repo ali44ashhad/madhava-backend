@@ -21,9 +21,6 @@ enum OrderStatus {
   SHIPPED
   DELIVERED
   CANCELLED
-  RETURN_REQUESTED
-  RETURN_APPROVED
-  RETURN_REJECTED
   REFUNDED
 }
 
@@ -42,6 +39,8 @@ enum PaymentStatus {
 enum ReturnStatus {
   REQUESTED
   APPROVED
+  RECEIVED
+  REFUNDED
   REJECTED
 }
 

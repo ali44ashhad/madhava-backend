@@ -52,9 +52,9 @@ export async function getDashboardMetrics(): Promise<DashboardMetricsResponse> {
         }),
 
         // 4.4 pendingReturns
-        prisma.order.count({
+        prisma.return.count({
             where: {
-                status: OrderStatus.RETURN_REQUESTED
+                status: 'REQUESTED'
             }
         }),
 
@@ -110,8 +110,7 @@ export async function getDashboardMetrics(): Promise<DashboardMetricsResponse> {
             PLACED: statusMap[OrderStatus.PLACED] || 0,
             CONFIRMED: statusMap[OrderStatus.CONFIRMED] || 0,
             SHIPPED: statusMap[OrderStatus.SHIPPED] || 0,
-            DELIVERED: statusMap[OrderStatus.DELIVERED] || 0,
-            RETURN_REQUESTED: statusMap[OrderStatus.RETURN_REQUESTED] || 0
+            DELIVERED: statusMap[OrderStatus.DELIVERED] || 0
         },
         inventory: {
             lowStock,

@@ -69,11 +69,19 @@ export async function initiateRefund(orderId: string, adminId: string): Promise<
     );
   }
 
-  // Validate order status is CANCELLED or RETURN_APPROVED
-  if (order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.RETURN_APPROVED) {
+  // For cancelled orders, we check order status directly.
+  // For returns, we check that the order has at least one received return.
+  const hasReceivedReturn = await prisma.return.findFirst({
+    where: {
+      orderItem: { orderId },
+      status: 'RECEIVED',
+    },
+  });
+
+  if (order.status !== OrderStatus.CANCELLED && !hasReceivedReturn) {
     throw new AppError(
       'INVALID_STATE',
-      `Refund can only be initiated for CANCELLED or RETURN_APPROVED orders. Current status: ${order.status}`,
+      `Refund can only be initiated for CANCELLED orders or orders with an RECEIVED return. Current status: ${order.status}`,
       400
     );
   }
@@ -133,6 +141,17 @@ export async function initiateRefund(orderId: string, adminId: string): Promise<
       data: {
         status: PaymentStatus.REFUNDED,
       },
+    });
+
+    // If this refund is triggered for a return, update the corresponding return status to REFUNDED
+    await tx.return.updateMany({
+      where: {
+        orderItem: { orderId },
+        status: 'RECEIVED'
+      },
+      data: {
+        status: 'REFUNDED'
+      }
     });
 
     logger.info('Refund created and order/payment status updated', {

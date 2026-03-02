@@ -9,7 +9,6 @@ export interface DashboardMetricsResponse {
         CONFIRMED: number;
         SHIPPED: number;
         DELIVERED: number;
-        RETURN_REQUESTED: number;
     };
     inventory: {
         lowStock: number;

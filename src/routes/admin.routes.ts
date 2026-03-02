@@ -7,7 +7,7 @@ import { createSubcategoryController, listSubcategoriesController, updateSubcate
 import { createProductController, addProductImageController, listProductsController } from '../controllers/product.controller.js';
 import { createSkuController, getSkuInventoryController, updateSkuStockController, addSkuImageController, listSkusController } from '../controllers/sku.controller.js';
 import { approveOrderController, putOrderOnHoldController, cancelOrderController, markOrderAsShippedController, markOrderAsDeliveredController, listOrdersController, cleanupStaleOrdersController } from '../controllers/order.controller.js';
-import { listReturnRequestsController, approveReturnController, rejectReturnController } from '../controllers/return.controller.js';
+import { listReturnRequestsController, approveReturnController, rejectReturnController, markReturnReceivedController } from '../controllers/return.controller.js';
 import { initiateRefundController } from '../controllers/refund.controller.js';
 import { adminAuth } from '../middlewares/adminAuth.middleware.js';
 
@@ -64,6 +64,7 @@ router.post('/orders/:orderId/refund', initiateRefundController);
 router.get('/returns', listReturnRequestsController);
 router.post('/returns/:returnId/approve', approveReturnController);
 router.post('/returns/:returnId/reject', rejectReturnController);
+router.post('/returns/:returnId/receive', markReturnReceivedController);
 
 export default router;
 

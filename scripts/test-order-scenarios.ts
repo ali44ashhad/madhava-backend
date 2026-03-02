@@ -414,7 +414,7 @@ async function run() {
     // ─────────────────────────────────────────────────────────────────────────────
     // 6. RETURN FLOW — Happy Path (Approved)
     // ─────────────────────────────────────────────────────────────────────────────
-    section('6 · Return Flow: DELIVERED → RETURN_REQUESTED → RETURN_APPROVED');
+    section('6 · Return Flow: DELIVERED (Return Requested) → DELIVERED (Return Approved)');
 
     r = await placeOrder(customerToken, addressId, skuId, 'COD');
     let returnOrderId = r.data?.data?.orderId;
@@ -435,20 +435,20 @@ async function run() {
 
         let returnId = r.data?.data?.returnId;
         order = await prisma.order.findUnique({ where: { id: returnOrderId } });
-        order?.status === OrderStatus.RETURN_REQUESTED ? pass('DB: order.status = RETURN_REQUESTED') : fail('DB: order.status = RETURN_REQUESTED', `got ${order?.status}`);
+        order?.status === OrderStatus.DELIVERED ? pass('DB: order.status = DELIVERED') : fail('DB: order.status = DELIVERED', `got ${order?.status}`);
 
         // Admin approves return
         r = await http('POST', `/admin/returns/${returnId}/approve`, {}, adminToken);
         assertStatus('Admin approves return → 200', r.status, 200);
 
         order = await prisma.order.findUnique({ where: { id: returnOrderId } });
-        order?.status === OrderStatus.RETURN_APPROVED ? pass('DB: order.status = RETURN_APPROVED') : fail('DB: order.status = RETURN_APPROVED', `got ${order?.status}`);
+        order?.status === OrderStatus.DELIVERED ? pass('DB: order.status = DELIVERED') : fail('DB: order.status = DELIVERED', `got ${order?.status}`);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // 7. RETURN FLOW — Rejected
     // ─────────────────────────────────────────────────────────────────────────────
-    section('7 · Return Flow: DELIVERED → RETURN_REQUESTED → RETURN_REJECTED');
+    section('7 · Return Flow: DELIVERED (Return Requested) → DELIVERED (Return Rejected)');
 
     r = await placeOrder(customerToken, addressId, skuId, 'COD');
     let rejectReturnOrderId = r.data?.data?.orderId;
@@ -467,7 +467,7 @@ async function run() {
         assertStatus('Admin rejects return → 200', r.status, 200);
 
         order = await prisma.order.findUnique({ where: { id: rejectReturnOrderId } });
-        order?.status === OrderStatus.RETURN_REJECTED ? pass('DB: order.status = RETURN_REJECTED') : fail('DB: order.status = RETURN_REJECTED', `got ${order?.status}`);
+        order?.status === OrderStatus.DELIVERED ? pass('DB: order.status = DELIVERED') : fail('DB: order.status = DELIVERED', `got ${order?.status}`);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
