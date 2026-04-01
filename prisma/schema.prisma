@@ -7,12 +7,16 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 // ============================================
 // ENUMS
 // ============================================
+
+enum DiscountType {
+  PERCENTAGE
+  FLAT
+}
 
 enum OrderStatus {
   PLACED
@@ -50,16 +54,22 @@ enum RefundStatus {
   FAILED
 }
 
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ============================================
 // CORE MODELS
 // ============================================
 
 model Category {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  imageUrl  String?
-  isActive  Boolean  @default(true)
+  id       String  @id @default(uuid())
+  name     String
+  slug     String  @unique
+  imageUrl String?
+  isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -67,96 +77,106 @@ model Category {
   subcategories Subcategory[]
   products      Product[]
 
+  @@index([isActive])
   @@map("categories")
 }
 
 model Subcategory {
-  id         String   @id @default(uuid())
-  name       String
-  slug       String
-  imageUrl   String?
-  isActive   Boolean  @default(true)
+  id       String  @id @default(uuid())
+  name     String
+  slug     String
+  imageUrl String?
+  isActive Boolean @default(true)
 
   categoryId String
   category   Category @relation(fields: [categoryId], references: [id])
 
-  products   Product[]
+  products Product[]
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([categoryId, slug])
   @@map("subcategories")
 }
 
 model Product {
-  id            String   @id @default(uuid())
-  name          String
-  description   String?
-  isFeatured    Boolean  @default(false)
-  isActive      Boolean  @default(true)
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  isFeatured  Boolean @default(false)
+  featuredImageUrl String?
+  isActive    Boolean @default(true)
 
   categoryId    String
   subcategoryId String
 
-  category      Category    @relation(fields: [categoryId], references: [id])
-  subcategory   Subcategory @relation(fields: [subcategoryId], references: [id])
+  category    Category    @relation(fields: [categoryId], references: [id])
+  subcategory Subcategory @relation(fields: [subcategoryId], references: [id])
 
-  skus          Sku[]
-  images        ProductImage[]
-
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@map("products")
-}
-
-model ProductImage {
-  id        String  @id @default(uuid())
-  imageUrl  String
-  sortOrder Int     @default(0)
-
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-
-  @@map("product_images")
-}
-
-model Sku {
-  id        String @id @default(uuid())
-  skuCode   String @unique
-
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-
-  size      String?
-  weight    String?
-  material  String?
-  color     String?
-
-  mrp            Decimal
-  sellingPrice   Decimal
-  festivePrice   Decimal?
-  gstPercent     Decimal
-
-  stockQuantity  Int
-  isCodAllowed   Boolean @default(true)
-  isActive       Boolean @default(true)
-
-  countryOfOrigin      String
-  manufacturerName     String
-  manufacturerAddress  String
-  sellerName           String
-  sellerAddress        String
-  sellerPincode        String
-
-  images      SkuImage[]
-  orderItems  OrderItem[]
-  cartItems   CartItem[]
+  skus   Sku[]
+  images ProductImage[]
+  reviews Review[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([isActive])
+  @@index([categoryId])
+  @@index([subcategoryId])
+  @@index([isActive, isFeatured])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String @id @default(uuid())
+  imageUrl  String
+  sortOrder Int    @default(0)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model Sku {
+  id      String @id @default(uuid())
+  skuCode String @unique
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  size     String?
+  weight   String?
+  material String?
+  color    String?
+
+  mrp          Decimal
+  sellingPrice Decimal
+  festivePrice Decimal?
+  gstPercent   Decimal
+
+  stockQuantity Int
+  isCodAllowed  Boolean @default(true)
+  isActive      Boolean @default(true)
+
+  countryOfOrigin     String
+  manufacturerName    String
+  manufacturerAddress String
+  sellerName          String
+  sellerAddress       String
+  sellerPincode       String
+
+  images     SkuImage[]
+  orderItems OrderItem[]
+  cartItems  CartItem[]
+  reviews    Review[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
   @@map("skus")
 }
 
@@ -166,8 +186,9 @@ model SkuImage {
   sortOrder Int    @default(0)
 
   skuId String
-  sku   Sku @relation(fields: [skuId], references: [id])
+  sku   Sku    @relation(fields: [skuId], references: [id])
 
+  @@index([skuId])
   @@map("sku_images")
 }
 
@@ -181,31 +202,35 @@ model Customer {
   email String @unique
   phone String
 
-  addresses Address[]
-  orders    Order[]
-  sessions  CustomerSession[]
-  cart      Cart?
+  addresses    Address[]
+  orders       Order[]
+  sessions     CustomerSession[]
+  cart         Cart?
+  couponUsages CouponUsage[]
+  reviews      Review[]
 
   createdAt DateTime @default(now())
 
+  @@index([phone])
   @@map("customers")
 }
 
 model Address {
-  id       String @id @default(uuid())
-  name     String
-  phone    String
+  id    String @id @default(uuid())
+  name  String
+  phone String
 
-  line1    String
-  line2    String?
-  city     String
-  state    String
-  pincode  String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  pincode   String
   isDefault Boolean @default(false)
 
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
+  @@index([customerId])
   @@map("addresses")
 }
 
@@ -219,6 +244,7 @@ model OtpVerification {
   attempts  Int      @default(0)
   createdAt DateTime @default(now())
 
+  @@index([phone, purpose, createdAt])
   @@map("otp_verifications")
 }
 
@@ -229,8 +255,9 @@ model CustomerSession {
   expiresAt  DateTime
   createdAt  DateTime @default(now())
 
-  customer   Customer @relation(fields: [customerId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
 
+  @@index([tokenHash])
   @@map("customer_sessions")
 }
 
@@ -239,11 +266,11 @@ model CustomerSession {
 // ============================================
 
 model Order {
-  id          String      @id @default(uuid())
-  orderNumber String      @unique
+  id          String @id @default(uuid())
+  orderNumber String @unique
 
-  customerId  String
-  customer    Customer    @relation(fields: [customerId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
 
   addressSnapshot Json
   shippingInfo    Json?
@@ -257,37 +284,51 @@ model Order {
   codFee         Decimal
   totalAmount    Decimal
 
-  orderItems OrderItem[]
-  payments   Payment[]
-  refunds    Refund[]
+  orderItems  OrderItem[]
+  payments    Payment[]
+  refunds     Refund[]
+  couponUsage CouponUsage?
 
-  placedAt    DateTime @default(now())
+  couponCode     String?
+  discountAmount Decimal @default(0)
+
+  placedAt    DateTime  @default(now())
   confirmedAt DateTime?
   shippedAt   DateTime?
   deliveredAt DateTime?
   cancelledAt DateTime?
 
+  @@index([placedAt])
+  @@index([customerId, placedAt])
   @@map("orders")
 }
 
 model OrderItem {
-  id      String @id @default(uuid())
+  id String @id @default(uuid())
 
   orderId String
-  order   Order @relation(fields: [orderId], references: [id])
+  order   Order  @relation(fields: [orderId], references: [id])
 
-  skuId       String
-  sku         Sku @relation(fields: [skuId], references: [id])
+  skuId String
+  sku   Sku    @relation(fields: [skuId], references: [id])
 
   skuSnapshot Json
 
-  quantity      Int
-  pricePerUnit  Decimal
-  gstPercent    Decimal
+  quantity     Int
+  pricePerUnit Decimal
+  gstPercent   Decimal
   totalPrice   Decimal
 
-  return Return?
+  // Coupon discount allocation (post-tax). Stored for refund accuracy and UI.
+  discountAmount   Decimal @default(0)
+  netTotalPrice    Decimal?
+  netPricePerUnit  Decimal?
 
+  return Return?
+  review Review?
+
+  @@index([orderId])
+  @@index([skuId])
   @@map("order_items")
 }
 
@@ -296,35 +337,40 @@ model OrderItem {
 // ============================================
 
 model Payment {
-  id        String @id @default(uuid())
-  orderId   String
-  order     Order  @relation(fields: [orderId], references: [id])
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
 
-  provider  String
-  reference String?
+  provider         String
+  reference        String?
+  gatewayPaymentId String? // Razorpay payment id (pay_...)
 
-  amount    Decimal
-  status    PaymentStatus
+  amount Decimal
+  status PaymentStatus
 
   createdAt DateTime @default(now())
 
+  @@index([reference])
+  @@index([orderId])
   @@map("payments")
 }
 
 model Return {
-  id        String @id @default(uuid())
-  orderItemId String @unique
+  id          String    @id @default(uuid())
+  orderItemId String    @unique
   orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
 
   reason       String
   customerNote String?
   status       ReturnStatus
 
-  images   ReturnImage[]
+  images ReturnImage[]
 
-  requestedAt DateTime @default(now())
+  requestedAt DateTime  @default(now())
   reviewedAt  DateTime?
 
+  @@index([status])
+  @@index([requestedAt])
   @@map("returns")
 }
 
@@ -335,13 +381,14 @@ model ReturnImage {
   returnId String
   return   Return @relation(fields: [returnId], references: [id])
 
+  @@index([returnId])
   @@map("return_images")
 }
 
 model Refund {
-  id        String @id @default(uuid())
-  orderId   String
-  order     Order @relation(fields: [orderId], references: [id])
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
 
   amount    Decimal
   status    RefundStatus
@@ -349,6 +396,9 @@ model Refund {
 
   createdAt DateTime @default(now())
 
+  @@index([createdAt])
+  @@index([orderId])
+  @@index([reference])
   @@map("refunds")
 }
 
@@ -357,17 +407,18 @@ model Refund {
 // ============================================
 
 model Admin {
-  id          String   @id @default(uuid())
-  email       String   @unique
+  id           String  @id @default(uuid())
+  email        String  @unique
   passwordHash String
-  role        String   @default("ADMIN")
-  isActive    Boolean  @default(true)
+  role         String  @default("ADMIN")
+  isActive     Boolean @default(true)
 
-  createdAt   DateTime @default(now())
+  reviewedReviews Review[]
+
+  createdAt DateTime @default(now())
 
   @@map("admins")
 }
-
 
 // ============================================
 // CART (STATE ONLY)
@@ -385,14 +436,98 @@ model Cart {
 }
 
 model CartItem {
-  id        String   @id @default(uuid())
-  cartId    String
-  skuId     String
-  quantity  Int
+  id       String @id @default(uuid())
+  cartId   String
+  skuId    String
+  quantity Int
 
-  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  sku       Sku      @relation(fields: [skuId], references: [id])
+  cart Cart @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  sku  Sku  @relation(fields: [skuId], references: [id])
 
   @@unique([cartId, skuId])
   @@map("cart_items")
+}
+
+// ============================================
+// COUPONS & PROMO CODES
+// ============================================
+
+model Coupon {
+  id                    String       @id @default(uuid())
+  code                  String       @unique
+  description           String?
+  discountType          DiscountType
+  discountValue         Decimal
+  minOrderAmount        Decimal?
+  maxDiscount           Decimal?
+  usageLimit            Int?
+  usageLimitPerCustomer Int          @default(1)
+  usageCount            Int          @default(0)
+  isActive              Boolean      @default(true)
+  startsAt              DateTime     @default(now())
+  expiresAt             DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customerUses CouponUsage[]
+
+  @@index([createdAt])
+  @@map("coupons")
+}
+
+model CouponUsage {
+  id         String   @id @default(uuid())
+  couponId   String
+  customerId String
+  orderId    String   @unique
+  usedAt     DateTime @default(now())
+
+  coupon   Coupon   @relation(fields: [couponId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+  order    Order    @relation(fields: [orderId], references: [id])
+
+  @@unique([couponId, customerId, orderId])
+  @@map("coupon_usages")
+}
+
+// ============================================
+// REVIEWS (MODERATED PUBLIC FEED)
+// ============================================
+
+model Review {
+  id String @id @default(uuid())
+
+  orderItemId String @unique
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Stored denormalized to make product listing/query faster.
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  skuId String?
+  sku   Sku? @relation(fields: [skuId], references: [id])
+
+  rating Int
+
+  title   String?
+  comment String?
+
+  status          ReviewStatus @default(PENDING)
+  reviewedByAdminId String?
+  reviewedByAdmin   Admin? @relation(fields: [reviewedByAdminId], references: [id])
+
+  rejectionReason String?
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId, status, createdAt])
+  @@index([customerId, createdAt])
+  @@index([status, createdAt])
+  @@map("reviews")
 }

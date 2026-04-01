@@ -4,6 +4,8 @@ import { placeOrderController, getMyOrdersController, getOrderByIdController, ca
 import { createCustomerController } from '../controllers/customer.controller.js';
 import { createAddressController, getCustomerAddressesController, updateAddressController, deleteAddressController } from '../controllers/address.controller.js';
 import { requestReturnController } from '../controllers/return.controller.js';
+import { validateCouponController } from '../controllers/coupon.controller.js';
+import { createReviewController, updateReviewController, listApprovedProductReviewsController } from '../controllers/review.controller.js';
 
 const router = Router();
 
@@ -38,9 +40,18 @@ router.get('/orders/:orderId', customerAuthMiddleware, getOrderByIdController);
 router.post('/orders/:orderId/cancel', customerAuthMiddleware, cancelMyOrderController);
 router.post('/orders/:orderItemId/return', customerAuthMiddleware, requestReturnController);
 
+// Reviews (delivered-order gated)
+router.post('/reviews', customerAuthMiddleware, createReviewController);
+router.patch('/reviews/:reviewId', customerAuthMiddleware, updateReviewController);
+
+// Coupons
+router.post('/coupons/validate', customerAuthMiddleware, validateCouponController);
+
+// Approved product reviews
+router.get('/products/:productId/reviews', listApprovedProductReviewsController);
+
 // Authenticated Address Routes (Update & Delete)
 router.put('/addresses/:addressId', customerAuthMiddleware, updateAddressController);
 router.delete('/addresses/:addressId', customerAuthMiddleware, deleteAddressController);
 
 export default router;
-

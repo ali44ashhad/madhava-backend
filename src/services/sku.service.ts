@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
-import { Decimal } from '@prisma/client/runtime/library';
+import { Prisma } from '@prisma/client';
 
 /**
  * Create SKU input
@@ -25,6 +25,27 @@ export interface CreateSkuInput {
   sellerName: string;
   sellerAddress: string;
   sellerPincode: string;
+}
+
+export interface UpdateSkuInput {
+  skuCode?: string;
+  productId?: string;
+  size?: string;
+  weight?: string;
+  material?: string;
+  color?: string;
+  mrp?: number;
+  sellingPrice?: number;
+  festivePrice?: number | null;
+  gstPercent?: number;
+  isCodAllowed?: boolean;
+  isActive?: boolean;
+  countryOfOrigin?: string;
+  manufacturerName?: string;
+  manufacturerAddress?: string;
+  sellerName?: string;
+  sellerAddress?: string;
+  sellerPincode?: string;
 }
 
 /**
@@ -91,10 +112,10 @@ export async function createSku(input: CreateSkuInput) {
       weight: input.weight || null,
       material: input.material || null,
       color: input.color || null,
-      mrp: new Decimal(input.mrp),
-      sellingPrice: new Decimal(input.sellingPrice),
-      festivePrice: input.festivePrice ? new Decimal(input.festivePrice) : null,
-      gstPercent: new Decimal(input.gstPercent),
+      mrp: new Prisma.Decimal(input.mrp),
+      sellingPrice: new Prisma.Decimal(input.sellingPrice),
+      festivePrice: input.festivePrice ? new Prisma.Decimal(input.festivePrice) : null,
+      gstPercent: new Prisma.Decimal(input.gstPercent),
       stockQuantity: input.stockQuantity,
       isCodAllowed: input.isCodAllowed ?? true,
       isActive: true,
@@ -112,6 +133,102 @@ export async function createSku(input: CreateSkuInput) {
 
   logger.info('SKU created successfully', { skuId: sku.id });
   return sku;
+}
+
+export async function updateSku(skuId: string, input: UpdateSkuInput) {
+  logger.info('Updating SKU', { skuId });
+
+  const existing = await prisma.sku.findUnique({
+    where: { id: skuId },
+  });
+
+  if (!existing) {
+    logger.warn('Update SKU failed: SKU not found', { skuId });
+    throw new AppError('NOT_FOUND', `SKU with id '${skuId}' not found`, 404);
+  }
+
+  const nextProductId = input.productId ?? existing.productId;
+  if (input.productId !== undefined && input.productId !== existing.productId) {
+    const product = await prisma.product.findUnique({
+      where: { id: nextProductId },
+    });
+    if (!product) {
+      throw new AppError('NOT_FOUND', `Product with id '${nextProductId}' not found`, 404);
+    }
+  }
+
+  if (input.skuCode !== undefined && input.skuCode !== existing.skuCode) {
+    const duplicate = await prisma.sku.findUnique({
+      where: { skuCode: input.skuCode },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new AppError('BAD_REQUEST', `SKU with code '${input.skuCode}' already exists`, 400);
+    }
+  }
+
+  if (input.mrp !== undefined && input.mrp <= 0) {
+    throw new AppError('VALIDATION_ERROR', 'MRP must be greater than 0', 400);
+  }
+
+  if (input.sellingPrice !== undefined && input.sellingPrice <= 0) {
+    throw new AppError('VALIDATION_ERROR', 'Selling price must be greater than 0', 400);
+  }
+
+  if (input.festivePrice !== undefined && input.festivePrice !== null && input.festivePrice <= 0) {
+    throw new AppError('VALIDATION_ERROR', 'Festive price must be greater than 0', 400);
+  }
+
+  if (input.gstPercent !== undefined && (input.gstPercent < 0 || input.gstPercent > 100)) {
+    throw new AppError('VALIDATION_ERROR', 'GST percent must be between 0 and 100', 400);
+  }
+
+  const updated = await prisma.sku.update({
+    where: { id: skuId },
+    data: {
+      skuCode: input.skuCode !== undefined ? input.skuCode : undefined,
+      productId: input.productId !== undefined ? input.productId : undefined,
+      size: input.size !== undefined ? input.size || null : undefined,
+      weight: input.weight !== undefined ? input.weight || null : undefined,
+      material: input.material !== undefined ? input.material || null : undefined,
+      color: input.color !== undefined ? input.color || null : undefined,
+      mrp: input.mrp !== undefined ? new Prisma.Decimal(input.mrp) : undefined,
+      sellingPrice: input.sellingPrice !== undefined ? new Prisma.Decimal(input.sellingPrice) : undefined,
+      festivePrice:
+        input.festivePrice !== undefined
+          ? input.festivePrice === null
+            ? null
+            : new Prisma.Decimal(input.festivePrice)
+          : undefined,
+      gstPercent: input.gstPercent !== undefined ? new Prisma.Decimal(input.gstPercent) : undefined,
+      isCodAllowed: input.isCodAllowed !== undefined ? input.isCodAllowed : undefined,
+      isActive: input.isActive !== undefined ? input.isActive : undefined,
+      countryOfOrigin: input.countryOfOrigin !== undefined ? input.countryOfOrigin : undefined,
+      manufacturerName: input.manufacturerName !== undefined ? input.manufacturerName : undefined,
+      manufacturerAddress: input.manufacturerAddress !== undefined ? input.manufacturerAddress : undefined,
+      sellerName: input.sellerName !== undefined ? input.sellerName : undefined,
+      sellerAddress: input.sellerAddress !== undefined ? input.sellerAddress : undefined,
+      sellerPincode: input.sellerPincode !== undefined ? input.sellerPincode : undefined,
+    },
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          images: {
+            take: 1,
+            orderBy: { sortOrder: 'asc' },
+          },
+        },
+      },
+      images: {
+        orderBy: { sortOrder: 'asc' },
+      },
+    },
+  });
+
+  logger.info('SKU updated successfully', { skuId: updated.id });
+  return updated;
 }
 
 /**
@@ -278,6 +395,89 @@ export async function addSkuImage(skuId: string, imageUrl: string, sortOrder: nu
   return skuImage;
 }
 
+export async function listSkuImages(skuId: string) {
+  const sku = await prisma.sku.findUnique({
+    where: { id: skuId },
+    select: { id: true },
+  });
+
+  if (!sku) {
+    throw new AppError('NOT_FOUND', `SKU with id '${skuId}' not found`, 404);
+  }
+
+  return prisma.skuImage.findMany({
+    where: { skuId },
+    orderBy: { sortOrder: 'asc' },
+    select: {
+      id: true,
+      imageUrl: true,
+      sortOrder: true,
+      skuId: true,
+    },
+  });
+}
+
+export async function deleteSkuImage(skuId: string, imageId: string) {
+  logger.info('Deleting SKU image', { skuId, imageId });
+
+  const image = await prisma.skuImage.findUnique({
+    where: { id: imageId },
+    select: { id: true, skuId: true },
+  });
+
+  if (!image) {
+    throw new AppError('NOT_FOUND', `SKU image with id '${imageId}' not found`, 404);
+  }
+
+  if (image.skuId !== skuId) {
+    throw new AppError('BAD_REQUEST', 'Image does not belong to the specified SKU', 400);
+  }
+
+  await prisma.skuImage.delete({
+    where: { id: imageId },
+  });
+
+  logger.info('SKU image deleted successfully', { imageId });
+  return { deleted: true };
+}
+
+export async function reorderSkuImages(
+  skuId: string,
+  updates: Array<{ id: string; sortOrder: number }>
+) {
+  logger.info('Reordering SKU images', { skuId, count: updates.length });
+
+  const sku = await prisma.sku.findUnique({
+    where: { id: skuId },
+    select: { id: true },
+  });
+
+  if (!sku) {
+    throw new AppError('NOT_FOUND', `SKU with id '${skuId}' not found`, 404);
+  }
+
+  const ids = updates.map((u) => u.id);
+  const existing = await prisma.skuImage.findMany({
+    where: { skuId, id: { in: ids } },
+    select: { id: true },
+  });
+
+  if (existing.length !== ids.length) {
+    throw new AppError('BAD_REQUEST', 'One or more images do not belong to the specified SKU', 400);
+  }
+
+  await prisma.$transaction(
+    updates.map((u) =>
+      prisma.skuImage.update({
+        where: { id: u.id },
+        data: { sortOrder: u.sortOrder },
+      })
+    )
+  );
+
+  return listSkuImages(skuId);
+}
+
 
 /**
  * Get all SKUs with pagination and search
@@ -286,9 +486,10 @@ export async function getAllSkus(
   page: number = 1,
   limit: number = 20,
   search?: string,
-  stock?: string
+  stock?: string,
+  productId?: string
 ) {
-  logger.info('Fetching all SKUs', { page, limit, search });
+  logger.info('Fetching all SKUs', { page, limit, search, productId });
 
   const skip = (page - 1) * limit;
 
@@ -304,6 +505,10 @@ export async function getAllSkus(
 
   // If we want to show all (active and inactive), we don't set isActive here.
   // However, the previous getSkuInventory only selected active status.
+
+  if (productId) {
+    where.productId = productId;
+  }
 
   if (search) {
     where.OR = [

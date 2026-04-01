@@ -11,6 +11,7 @@ export interface CreateProductInput {
   categoryId: string;
   subcategoryId: string;
   isFeatured?: boolean;
+  featuredImageUrl?: string;
 }
 
 /**
@@ -51,6 +52,10 @@ export async function createProduct(input: CreateProductInput) {
   }
 
   // Create product with isActive = true by default
+  if ((input.isFeatured ?? false) && (!input.featuredImageUrl || input.featuredImageUrl.trim().length === 0)) {
+    throw new AppError('VALIDATION_ERROR', 'Featured image is required when product is featured', 400);
+  }
+
   const product = await prisma.product.create({
     data: {
       name: input.name,
@@ -58,6 +63,7 @@ export async function createProduct(input: CreateProductInput) {
       categoryId: input.categoryId,
       subcategoryId: input.subcategoryId,
       isFeatured: input.isFeatured ?? false,
+      featuredImageUrl: input.featuredImageUrl?.trim() || null,
       isActive: true,
     },
     include: {
@@ -112,14 +118,28 @@ export async function addProductImage(input: AddProductImageInput) {
  * List products for admin
  * Returns all products with pagination, without stock/SKU restrictions
  */
-export async function listProducts(page = 1, limit = 20) {
+export async function listProducts(page = 1, limit = 20, search?: string, isFeatured?: boolean) {
   const skip = (page - 1) * limit;
 
-  logger.info('Listing products for admin', { page, limit });
+  logger.info('Listing products for admin', { page, limit, search, isFeatured });
 
-  const total = await prisma.product.count();
+  const where: any = {};
+
+  if (search) {
+    where.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+
+  if (isFeatured !== undefined) {
+    where.isFeatured = isFeatured;
+  }
+
+  const total = await prisma.product.count({ where });
 
   const products = await prisma.product.findMany({
+    where,
     skip,
     take: limit,
     include: {
@@ -149,7 +169,7 @@ export async function listProducts(page = 1, limit = 20) {
 
   const transformedProducts = products.map((product) => ({
     ...product,
-    featuredImageUrl: product.images[0]?.imageUrl || null,
+    featuredImageUrl: product.featuredImageUrl ?? product.images[0]?.imageUrl ?? null,
     skuCount: product._count.skus,
   }));
 
@@ -164,5 +184,82 @@ export async function listProducts(page = 1, limit = 20) {
       totalPages,
     },
   };
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  description?: string;
+  categoryId?: string;
+  subcategoryId?: string;
+  isFeatured?: boolean;
+  featuredImageUrl?: string | null;
+}
+
+export async function updateProduct(productId: string, input: UpdateProductInput) {
+  logger.info('Updating product', { productId });
+
+  const existing = await prisma.product.findUnique({
+    where: { id: productId },
+  });
+
+  if (!existing) {
+    logger.warn('Update product failed: product not found', { productId });
+    throw new AppError('NOT_FOUND', `Product with id '${productId}' not found`, 404);
+  }
+
+  const nextCategoryId = input.categoryId ?? existing.categoryId;
+  const nextSubcategoryId = input.subcategoryId ?? existing.subcategoryId;
+
+  // Validate category/subcategory if either changed
+  if (input.categoryId !== undefined || input.subcategoryId !== undefined) {
+    const category = await prisma.category.findUnique({ where: { id: nextCategoryId } });
+    if (!category) {
+      throw new AppError('NOT_FOUND', `Category with id '${nextCategoryId}' not found`, 404);
+    }
+
+    const subcategory = await prisma.subcategory.findUnique({ where: { id: nextSubcategoryId } });
+    if (!subcategory) {
+      throw new AppError('NOT_FOUND', `Subcategory with id '${nextSubcategoryId}' not found`, 404);
+    }
+
+    if (subcategory.categoryId !== nextCategoryId) {
+      throw new AppError('BAD_REQUEST', `Subcategory '${nextSubcategoryId}' does not belong to category '${nextCategoryId}'`, 400);
+    }
+  }
+
+  const nextIsFeatured = input.isFeatured ?? existing.isFeatured;
+
+  const nextFeaturedImageUrlRaw =
+    input.featuredImageUrl !== undefined ? input.featuredImageUrl : existing.featuredImageUrl;
+
+  const nextFeaturedImageUrl =
+    nextFeaturedImageUrlRaw === null ? null : nextFeaturedImageUrlRaw?.trim() || null;
+
+  if (nextIsFeatured && !nextFeaturedImageUrl) {
+    throw new AppError('VALIDATION_ERROR', 'Featured image is required when product is featured', 400);
+  }
+
+  const updated = await prisma.product.update({
+    where: { id: productId },
+    data: {
+      name: input.name !== undefined ? input.name : undefined,
+      description: input.description !== undefined ? input.description || null : undefined,
+      categoryId: input.categoryId !== undefined ? input.categoryId : undefined,
+      subcategoryId: input.subcategoryId !== undefined ? input.subcategoryId : undefined,
+      isFeatured: input.isFeatured !== undefined ? input.isFeatured : undefined,
+      featuredImageUrl: nextIsFeatured ? nextFeaturedImageUrl : null,
+    },
+    include: {
+      category: true,
+      subcategory: true,
+      images: {
+        orderBy: { sortOrder: 'asc' },
+        select: { imageUrl: true, sortOrder: true, id: true },
+      },
+    },
+  });
+
+  logger.info('Product updated successfully', { productId: updated.id });
+  return updated;
 }
 

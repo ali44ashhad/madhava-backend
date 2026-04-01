@@ -11,6 +11,16 @@ import { logger } from '../utils/logger.js';
 const getProductsQuerySchema = z.object({
   categorySlug: z.string().optional(),
   subcategorySlug: z.string().optional(),
+  maxPrice: z.string().regex(/^\d+$/).transform(Number).optional(),
+  q: z
+    .preprocess((v) => {
+      if (typeof v !== 'string') return v;
+      const t = v.trim();
+      return t.length > 0 ? t : undefined;
+    }, z.string().max(100))
+    .optional(),
+  isFeatured: z.enum(['true', 'false']).transform(v => v === 'true').optional(),
+  sort: z.enum(['newest', 'oldest', 'priceLow', 'priceHigh', 'popularity']).optional(),
   page: z.string().regex(/^\d+$/).transform(Number).optional(),
   limit: z.string().regex(/^\d+$/).transform(Number).optional(),
 });
@@ -61,6 +71,10 @@ export async function getProductsController(
     const params: GetProductsParams = {
       categorySlug: validationResult.data.categorySlug,
       subcategorySlug: validationResult.data.subcategorySlug,
+      maxPrice: validationResult.data.maxPrice,
+      q: validationResult.data.q,
+      isFeatured: validationResult.data.isFeatured,
+      sort: validationResult.data.sort,
       page: validationResult.data.page,
       limit: validationResult.data.limit,
     };

@@ -24,6 +24,7 @@ const placeOrderSchema = z.object({
       })
     )
     .min(1, 'At least one item is required'),
+  couponCode: z.string().optional(),
 });
 
 /**
@@ -56,7 +57,7 @@ export async function placeOrderController(
       throw new AppError('VALIDATION_ERROR', errorMessages, 400);
     }
 
-    const { addressId, paymentMethod, paymentReference, items } = validationResult.data;
+    const { addressId, paymentMethod, paymentReference, items, couponCode } = validationResult.data;
     const customerId = req.customer.id;
 
     logger.info('Validation passed, calling place order service', {
@@ -71,8 +72,9 @@ export async function placeOrderController(
       customerId,
       addressId,
       paymentMethod,
-      paymentReference: paymentReference ?? null,
+      paymentReference: paymentReference ?? undefined,
       items,
+      couponCode,
     });
 
     logger.info('Order placed successfully', {
@@ -134,6 +136,7 @@ const cancelOrderSchema = z.object({
 const shipOrderSchema = z.object({
   courier: z.string().min(1, 'Courier name is required'),
   trackingId: z.string().min(1, 'Tracking ID is required'),
+  trackingLink: z.string().url('Must be a valid URL').optional(),
 });
 
 /**
@@ -369,7 +372,7 @@ export async function markOrderAsShippedController(
       throw new AppError('VALIDATION_ERROR', errorMessages, 400);
     }
 
-    const { courier, trackingId } = validationResult.data;
+    const { courier, trackingId, trackingLink } = validationResult.data;
 
     // Extract admin ID (set by adminAuth middleware)
     if (!req.admin) {
@@ -381,10 +384,11 @@ export async function markOrderAsShippedController(
       adminId: req.admin.id,
       courier,
       trackingId,
+      trackingLink,
     });
 
     // Call service to mark order as shipped
-    await markOrderAsShipped(orderId, req.admin.id, courier, trackingId);
+    await markOrderAsShipped(orderId, req.admin.id, courier, trackingId, trackingLink);
 
     logger.info('Order marked as shipped successfully', {
       orderId,
@@ -407,6 +411,7 @@ export async function markOrderAsShippedController(
           customerName: details.customerName,
           courier,
           trackingId,
+          trackingLink,
         });
       })
       .catch((err) => {

@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { createProduct, addProductImage, listProducts, CreateProductInput } from '../services/product.service.js';
+import { createProduct, addProductImage, listProducts, updateProduct, CreateProductInput } from '../services/product.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
@@ -14,6 +14,7 @@ const createProductSchema = z.object({
   categoryId: z.string().uuid('Invalid category ID format'),
   subcategoryId: z.string().uuid('Invalid subcategory ID format'),
   isFeatured: z.boolean().optional(),
+  featuredImageUrl: z.string().url('Invalid featured image URL').optional(),
 });
 
 /**
@@ -41,6 +42,7 @@ export async function createProductController(
       categoryId: validationResult.data.categoryId,
       subcategoryId: validationResult.data.subcategoryId,
       isFeatured: validationResult.data.isFeatured,
+      featuredImageUrl: validationResult.data.featuredImageUrl,
     };
 
     // Call service to create product
@@ -51,6 +53,42 @@ export async function createProductController(
     res.status(201).json(response);
   } catch (error) {
     logger.error('Error in create product controller', error);
+    next(error);
+  }
+}
+
+const updateProductSchema = z.object({
+  name: z.string().min(1, 'Name is required').optional(),
+  description: z.string().optional(),
+  categoryId: z.string().uuid('Invalid category ID format').optional(),
+  subcategoryId: z.string().uuid('Invalid subcategory ID format').optional(),
+  isFeatured: z.boolean().optional(),
+  featuredImageUrl: z.string().url('Invalid featured image URL').nullable().optional(),
+});
+
+/**
+ * Update product controller
+ * PUT /api/v1/admin/products/:productId
+ */
+export async function updateProductController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { productId } = req.params;
+    logger.info('Update product request received', { productId });
+
+    const validationResult = updateProductSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    const updated = await updateProduct(productId, validationResult.data);
+    res.status(200).json(createSuccessResponse(updated));
+  } catch (error) {
+    logger.error('Error in update product controller', error);
     next(error);
   }
 }
@@ -112,8 +150,10 @@ export async function listProductsController(
   try {
     const page = req.query.page ? Number(req.query.page) : 1;
     const limit = req.query.limit ? Number(req.query.limit) : 20;
+    const search = req.query.search as string | undefined;
+    const isFeatured = req.query.isFeatured !== undefined ? req.query.isFeatured === 'true' : undefined;
 
-    logger.info('List products request received', { page, limit });
+    logger.info('List products request received', { page, limit, search, isFeatured });
 
     // Validate page and limit
     if (page < 1) {
@@ -123,7 +163,7 @@ export async function listProductsController(
       throw new AppError('VALIDATION_ERROR', 'Limit must be between 1 and 100', 400);
     }
 
-    const result = await listProducts(page, limit);
+    const result = await listProducts(page, limit, search, isFeatured);
     const response = createSuccessResponse(result);
     res.status(200).json(response);
   } catch (error) {

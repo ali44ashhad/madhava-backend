@@ -1,8 +1,6 @@
 
-import { PrismaClient } from '@prisma/client';
 import { CartResponse, CartItemResponse } from '../types/cart.types.js';
-
-const prisma = new PrismaClient();
+import { prisma } from '../config/prisma.js';
 
 export const getCartService = async (customerId: string): Promise<CartResponse> => {
     const cart = await prisma.cart.findUnique({

@@ -53,12 +53,13 @@ export async function handlePaymentCaptured(payload: PaymentCapturedPayload): Pr
         return;
     }
 
-    // 3. Update status in a transaction
+    // 3. Update status and store gateway payment id in a transaction
     await prisma.$transaction([
         prisma.payment.update({
             where: { id: payment.id },
             data: {
                 status: PaymentStatus.PAID,
+                gatewayPaymentId: paymentId,
             },
         }),
         prisma.order.update({
@@ -69,7 +70,7 @@ export async function handlePaymentCaptured(payload: PaymentCapturedPayload): Pr
         })
     ]);
 
-    logger.info('Payment updated to PAID', { id: payment.id, razorpayPaymentId: paymentId });
+    logger.info('Payment updated to PAID', { id: payment.id, razorpayPaymentId: paymentId, razorpayOrderId });
 }
 
 /**
@@ -160,6 +161,12 @@ export async function handleRefundProcessed(payload: RefundProcessedPayload): Pr
     const refundEntity = payload.refund.entity;
     const refundId = refundEntity.id; // razorpay refund id (e.g. rfnd_...)
     const paymentId = refundEntity.payment_id;
+    const notes = refundEntity.notes || {};
+    const returnIdsRaw = typeof notes.returnIds === 'string' ? notes.returnIds : '';
+    const returnIds = returnIdsRaw
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
 
     logger.info('Handling refund.processed', { refundId, paymentId });
 
@@ -183,7 +190,6 @@ export async function handleRefundProcessed(payload: RefundProcessedPayload): Pr
     }
 
     // 3. Find associated payment to update
-    // We need to find the payment linked to the same order.
     // There should typically be one successful payment per order.
     const relevantPayment = await prisma.payment.findFirst({
         where: {
@@ -192,19 +198,90 @@ export async function handleRefundProcessed(payload: RefundProcessedPayload): Pr
         }
     });
 
-    // 4. Update Refund and Payment safely in transaction
+    // 4. Update Refund, Payment, and Order safely in a transaction
     if (relevantPayment) {
-        await prisma.$transaction([
-            prisma.refund.update({
+        await prisma.$transaction(async (tx) => {
+            // Mark this refund as completed
+            await tx.refund.update({
                 where: { id: refund.id },
                 data: { status: RefundStatus.COMPLETED }
-            }),
-            prisma.payment.update({
+            });
+
+            // Recalculate total refunded amount for the order (only COMPLETED refunds)
+            const completedRefunds = await tx.refund.findMany({
+                where: {
+                    orderId: refund.orderId,
+                    status: RefundStatus.COMPLETED
+                }
+            });
+
+            const totalRefunded = completedRefunds.reduce(
+                (sum, r) => sum + Number(r.amount),
+                0
+            );
+
+            // Fetch order totals to decide if fully refunded
+            const order = await tx.order.findUnique({
+                where: { id: refund.orderId }
+            });
+
+            if (!order) {
+                logger.warn('Order not found while processing refund webhook', { orderId: refund.orderId });
+                // Still mark payment as REFUNDED for safety
+                await tx.payment.update({
+                    where: { id: relevantPayment.id },
+                    data: { status: PaymentStatus.REFUNDED }
+                });
+                return;
+            }
+
+            // Use the captured PAID payment amount as our source-of-truth for "fully refunded".
+            // (Order subtotal/gst/discount logic can vary; payment.amount is what was actually captured.)
+            const refundableTotal = Number(relevantPayment.amount);
+
+            const isFullyRefunded = totalRefunded >= refundableTotal;
+
+            // Always mark the captured payment as REFUNDED once at least one refund completes
+            await tx.payment.update({
                 where: { id: relevantPayment.id },
-                data: { status: PaymentStatus.REFUNDED }
-            })
-        ]);
-        logger.info('Refund processed and Payment updated', { refundId, paymentId: relevantPayment.id });
+                data: {
+                    status: PaymentStatus.REFUNDED
+                }
+            });
+
+            // If the refund notes included specific return ids, mark only those returns as REFUNDED now
+            // (we intentionally do NOT mark returns as REFUNDED during initiation).
+            if (returnIds.length > 0) {
+                await tx.return.updateMany({
+                    where: {
+                        id: { in: returnIds },
+                        status: 'RECEIVED'
+                    },
+                    data: {
+                        status: 'REFUNDED'
+                    }
+                });
+            }
+
+            // If fully refunded, also update order paymentStatus and status
+            if (isFullyRefunded) {
+                await tx.order.update({
+                    where: { id: refund.orderId },
+                    data: {
+                        paymentStatus: PaymentStatus.REFUNDED,
+                        status: OrderStatus.REFUNDED
+                    }
+                });
+            }
+
+            logger.info('Refund processed and local state updated', {
+                refundId,
+                paymentId: relevantPayment.id,
+                totalRefunded,
+                refundableTotal,
+                isFullyRefunded
+            });
+        });
     } else {
         // Just update refund if payment not found (corner case)
         await prisma.refund.update({

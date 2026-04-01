@@ -149,7 +149,9 @@ export const verifyOtp = async (req: Request, res: Response) => {
 export const refresh = async (req: Request, res: Response) => {
     try {
         const refreshToken = req.cookies?.refreshToken;
+        
         if (!refreshToken) {
+            // Return null but don't clear cookie (in case of race where it's being set)
             res.status(200).json({ accessToken: null });
             return;
         }
@@ -161,9 +163,21 @@ export const refresh = async (req: Request, res: Response) => {
         res.status(200).json({ accessToken: result.newAccessToken });
 
     } catch (error) {
-        // Clear invalid or expired cookie
-        res.clearCookie('refreshToken');
-        res.status(200).json({ accessToken: null });
+        console.error('Refresh Token Error:', error instanceof Error ? error.message : error);
+        
+        // Only clear if the token is explicitly invalid or expired (401)
+        // This prevents transient errors (DB connection, 500s) from logging the user out permanently
+        if (error instanceof AppError && error.statusCode === 401) {
+            res.clearCookie('refreshToken');
+            res.status(200).json({ accessToken: null });
+        } else {
+            // For other errors (500, DB, etc.), return 500 and DON'T clear the cookie
+            // The frontend can then decide to retry or show an error message without losing the session
+            res.status(500).json({ 
+                error: 'Internal server error during refresh',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
     }
 };
 
@@ -185,10 +199,14 @@ export const logout = async (req: Request, res: Response) => {
 // HELPER
 
 function setRefreshTokenCookie(res: Response, token: string) {
+    const isProd = process.env.NODE_ENV === 'production';
     res.cookie('refreshToken', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
+        // If your frontend and API are on different domains in production, cookies will NOT be sent
+        // unless SameSite=None + Secure=true.
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        path: '/',
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     });
 }

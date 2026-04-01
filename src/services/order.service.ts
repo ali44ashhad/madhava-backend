@@ -1,10 +1,115 @@
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
-import { Decimal } from '@prisma/client/runtime/library';
 import { generateOrderNumber } from '../utils/order-number.js';
-import { PaymentMethod, PaymentStatus, OrderStatus } from '@prisma/client';
+import { Prisma, PaymentMethod, PaymentStatus, OrderStatus } from '@prisma/client';
 import { razorpay } from '../config/index.js';
+import { validateCoupon } from './coupon.service.js';
+
+function roundToPaise(amount: number) {
+  return Math.round(amount * 100) / 100;
+}
+
+type LineAllocation = {
+  discountAmount: number;
+  netTotalPrice: number;
+  netPricePerUnit: number;
+};
+
+function allocateOrderDiscountToLines(params: {
+  orderDiscount: number;
+  lines: Array<{ totalPrice: number; quantity: number; pricePerUnit: number }>;
+}): LineAllocation[] {
+  const { orderDiscount } = params;
+  const lines = params.lines;
+
+  if (lines.length === 0) return [];
+  if (!orderDiscount || orderDiscount <= 0) {
+    return lines.map((l) => ({
+      discountAmount: 0,
+      netTotalPrice: roundToPaise(l.totalPrice),
+      netPricePerUnit: roundToPaise(l.pricePerUnit),
+    }));
+  }
+
+  const orderSubtotal = lines.reduce((sum, l) => sum + l.totalPrice, 0);
+  if (orderSubtotal <= 0) {
+    // Degenerate case: no meaningful subtotal; treat as no allocation.
+    return lines.map((l) => ({
+      discountAmount: 0,
+      netTotalPrice: roundToPaise(l.totalPrice),
+      netPricePerUnit: roundToPaise(l.pricePerUnit),
+    }));
+  }
+
+  // Initial proportional allocation with paise rounding.
+  const allocations = lines.map((l) => {
+    const raw = (orderDiscount * l.totalPrice) / orderSubtotal;
+    const discountAmount = roundToPaise(raw);
+    const clampedDiscount = Math.min(l.totalPrice, Math.max(0, discountAmount));
+    const netTotalPrice = roundToPaise(Math.max(0, l.totalPrice - clampedDiscount));
+    const netPricePerUnit = l.quantity > 0 ? roundToPaise(netTotalPrice / l.quantity) : roundToPaise(l.pricePerUnit);
+    return { discountAmount: clampedDiscount, netTotalPrice, netPricePerUnit };
+  });
+
+  const allocated = roundToPaise(allocations.reduce((sum, a) => sum + a.discountAmount, 0));
+  let remainder = roundToPaise(orderDiscount - allocated);
+
+  if (remainder !== 0) {
+    // Assign remainder to the largest line (deterministic) while clamping.
+    let targetIdx = 0;
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].totalPrice > lines[targetIdx].totalPrice) targetIdx = i;
+    }
+
+    const lineTotal = lines[targetIdx].totalPrice;
+    const currentDiscount = allocations[targetIdx].discountAmount;
+    const newDiscount = roundToPaise(Math.min(lineTotal, Math.max(0, currentDiscount + remainder)));
+    const appliedDelta = roundToPaise(newDiscount - currentDiscount);
+
+    allocations[targetIdx].discountAmount = newDiscount;
+    allocations[targetIdx].netTotalPrice = roundToPaise(Math.max(0, lineTotal - newDiscount));
+    allocations[targetIdx].netPricePerUnit =
+      lines[targetIdx].quantity > 0
+        ? roundToPaise(allocations[targetIdx].netTotalPrice / lines[targetIdx].quantity)
+        : roundToPaise(lines[targetIdx].pricePerUnit);
+
+    remainder = roundToPaise(remainder - appliedDelta);
+  }
+
+  // If remainder still exists due to clamping, distribute it in a second pass.
+  if (remainder !== 0) {
+    const direction = remainder > 0 ? 1 : -1;
+    let remaining = remainder;
+
+    // Sort indices by totalPrice desc for deterministic distribution.
+    const indices = lines
+      .map((_, i) => i)
+      .sort((a, b) => lines[b].totalPrice - lines[a].totalPrice);
+
+    for (const idx of indices) {
+      if (remaining === 0) break;
+      const lineTotal = lines[idx].totalPrice;
+      const cur = allocations[idx].discountAmount;
+      const capacity =
+        direction > 0 ? roundToPaise(lineTotal - cur) : roundToPaise(cur); // how much we can add/remove
+      if (capacity <= 0) continue;
+
+      const delta = roundToPaise(Math.min(Math.abs(remaining), capacity)) * direction;
+      const next = roundToPaise(cur + delta);
+      allocations[idx].discountAmount = next;
+      allocations[idx].netTotalPrice = roundToPaise(Math.max(0, lineTotal - next));
+      allocations[idx].netPricePerUnit =
+        lines[idx].quantity > 0
+          ? roundToPaise(allocations[idx].netTotalPrice / lines[idx].quantity)
+          : roundToPaise(lines[idx].pricePerUnit);
+
+      remaining = roundToPaise(remaining - delta);
+    }
+  }
+
+  return allocations;
+}
 
 /**
  * Place order input item
@@ -21,8 +126,9 @@ export interface PlaceOrderInput {
   customerId: string;
   addressId: string;
   paymentMethod: PaymentMethod;
-  paymentReference: string | null;
+  paymentReference?: string;
   items: PlaceOrderItem[];
+  couponCode?: string;
 }
 
 /**
@@ -77,10 +183,16 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       },
       include: {
         product: {
-          select: {
-            id: true,
-            name: true,
+          include: {
+            images: {
+              orderBy: { sortOrder: 'asc' },
+              take: 1,
+            },
           },
+        },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+          take: 1,
         },
       },
     });
@@ -121,17 +233,29 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       }
     }
 
-    // Reduce stock for each SKU
+    // Reduce stock for each SKU using atomic operation to prevent race conditions
     for (const item of input.items) {
       const sku = skus.find((s) => s.id === item.skuId)!;
-      const newStock = sku.stockQuantity - item.quantity;
-
-      await tx.sku.update({
-        where: { id: sku.id },
+      
+      const updateResult = await tx.sku.updateMany({
+        where: { 
+          id: sku.id,
+          stockQuantity: { gte: item.quantity }
+        },
         data: {
-          stockQuantity: newStock,
+          stockQuantity: { decrement: item.quantity },
         },
       });
+
+      if (updateResult.count === 0) {
+        throw new AppError(
+          'OUT_OF_STOCK',
+          `Insufficient stock for SKU '${sku.skuCode}'. It may have been recently purchased by someone else.`,
+          400
+        );
+      }
+      
+      const newStock = sku.stockQuantity - item.quantity;
 
       logger.info('Stock reduced', {
         skuId: sku.id,
@@ -164,6 +288,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       const skuSnapshot = {
         productName: sku.product.name,
         skuCode: sku.skuCode,
+        imageUrl: sku.images[0]?.imageUrl || sku.product.images[0]?.imageUrl || null,
         size: sku.size,
         weight: sku.weight,
         material: sku.material,
@@ -183,9 +308,9 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       return {
         skuId: sku.id,
         quantity: item.quantity,
-        pricePerUnit: new Decimal(pricePerUnit),
-        gstPercent: new Decimal(gstPercent),
-        totalPrice: new Decimal(lineTotal),
+        pricePerUnit: new Prisma.Decimal(pricePerUnit),
+        gstPercent: new Prisma.Decimal(gstPercent),
+        totalPrice: new Prisma.Decimal(lineTotal),
         skuSnapshot,
         lineGstAmount,
       };
@@ -201,10 +326,36 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       0
     );
     const codFee = input.paymentMethod === PaymentMethod.COD ? COD_FEE : 0;
-    const totalAmount = subtotalAmount + codFee;
 
     // Generate order number (inside transaction for atomicity)
     const orderNumber = await generateOrderNumber(tx);
+
+    // Apply Coupon Logic
+    let discountAmount = 0;
+    let appliedCouponId: string | undefined;
+
+    if (input.couponCode) {
+      try {
+        const couponCodeStr = input.couponCode.toUpperCase().trim();
+        // Lock the coupon row in Postgres strictly to prevent concurrent global or per-customer usage bypasses
+        await tx.$executeRaw`SELECT id FROM "coupons" WHERE "code" = ${couponCodeStr} FOR UPDATE`;
+
+        const result = await validateCoupon(input.couponCode, subtotalAmount, input.customerId, tx as any);
+        discountAmount = result.discountAmount;
+        appliedCouponId = result.coupon.id;
+        logger.info('Coupon validated successfully during order placement', {
+          couponCode: input.couponCode,
+        });
+      } catch (error) {
+        logger.error('Coupon validation failed during order placement', {
+          couponCode: input.couponCode,
+          error
+        });
+        throw error; // Let AppErrors bubble up (e.g. invalid coupon)
+      }
+    }
+
+    const totalAmount = subtotalAmount - discountAmount + codFee;
 
     // Determine payment status
     // Both COD and RAZORPAY should initially be PENDING
@@ -242,28 +393,62 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
         status: OrderStatus.PLACED,
         paymentMethod: input.paymentMethod,
         paymentStatus,
-        subtotalAmount: new Decimal(subtotalAmount),
-        gstAmount: new Decimal(gstAmount),
-        codFee: new Decimal(codFee),
-        totalAmount: new Decimal(totalAmount),
+        subtotalAmount: new Prisma.Decimal(subtotalAmount),
+        gstAmount: new Prisma.Decimal(gstAmount),
+        codFee: new Prisma.Decimal(codFee),
+        totalAmount: new Prisma.Decimal(totalAmount),
+        couponCode: input.couponCode || null,
+        discountAmount: new Prisma.Decimal(discountAmount),
         placedAt: new Date(),
       },
     });
+
+    if (appliedCouponId) {
+      // Create CouponUsage record directly tied to order
+      await (tx as any).couponUsage.create({
+        data: {
+          couponId: appliedCouponId,
+          customerId: input.customerId,
+          orderId: order.id
+        }
+      });
+
+      // Increment total usage count
+      await (tx as any).coupon.update({
+        where: { id: appliedCouponId },
+        data: {
+          usageCount: { increment: 1 }
+        }
+      });
+    }
 
     logger.info('Order created', {
       orderId: order.id,
       orderNumber: order.orderNumber,
     });
 
+    // Allocate coupon discount to each order item (post-tax) so refunds can be item-accurate.
+    const lineAllocations = allocateOrderDiscountToLines({
+      orderDiscount: roundToPaise(discountAmount),
+      lines: orderItemsData.map((i) => ({
+        totalPrice: Number(i.totalPrice),
+        quantity: i.quantity,
+        pricePerUnit: Number(i.pricePerUnit),
+      })),
+    });
+
     // Create order items
     await tx.orderItem.createMany({
-      data: orderItemsData.map((item) => ({
+      data: orderItemsData.map((item, idx) => ({
         orderId: order.id,
         skuId: item.skuId,
         quantity: item.quantity,
         pricePerUnit: item.pricePerUnit,
         gstPercent: item.gstPercent,
         totalPrice: item.totalPrice,
+        discountAmount: new Prisma.Decimal(lineAllocations[idx]?.discountAmount ?? 0),
+        netTotalPrice: new Prisma.Decimal(lineAllocations[idx]?.netTotalPrice ?? Number(item.totalPrice)),
+        netPricePerUnit: new Prisma.Decimal(lineAllocations[idx]?.netPricePerUnit ?? Number(item.pricePerUnit)),
         skuSnapshot: item.skuSnapshot,
       })),
     });
@@ -287,6 +472,8 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
           receipt: orderNumber,
         });
         razorpayOrderId = rpOrder.id;
+        console.log("[DEBUG:]Razorpay order ", rpOrder);
+
         logger.info('Razorpay order created', { orderId: order.id, razorpayOrderId });
       } catch (error) {
         logger.error('Failed to create Razorpay order', { error, orderId: order.id });
@@ -300,7 +487,7 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
         orderId: order.id,
         provider: input.paymentMethod,
         reference: razorpayOrderId || input.paymentReference,
-        amount: new Decimal(totalAmount),
+        amount: new Prisma.Decimal(totalAmount),
         status: paymentStatus,
       },
     });
@@ -699,9 +886,10 @@ export async function markOrderAsShipped(
   orderId: string,
   adminId: string,
   courier: string,
-  trackingId: string
+  trackingId: string,
+  trackingLink?: string
 ): Promise<void> {
-  logger.info('Mark order as shipped request', { orderId, adminId, courier, trackingId });
+  logger.info('Mark order as shipped request', { orderId, adminId, courier, trackingId, trackingLink });
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -725,6 +913,7 @@ export async function markOrderAsShipped(
   const shippingInfo = {
     courier,
     trackingId,
+    trackingLink,
   };
 
   // Update order status, timestamp, and shipping info
@@ -743,6 +932,7 @@ export async function markOrderAsShipped(
     adminId,
     courier,
     trackingId,
+    trackingLink,
     previousStatus: OrderStatus.CONFIRMED,
     newStatus: OrderStatus.SHIPPED,
   });
@@ -820,7 +1010,16 @@ export async function getOrderDetailsForEmail(orderId: string) {
     include: {
       orderItems: {
         include: {
-          sku: true,
+          sku: {
+            include: {
+              images: true,
+              product: {
+                include: {
+                  images: true,
+                }
+              }
+            }
+          },
         }
       },
       customer: {
@@ -859,8 +1058,28 @@ export async function getCustomerOrders(customerId: string) {
     include: {
       orderItems: {
         include: {
-          sku: true,
+          sku: {
+            include: {
+              images: true,
+              product: {
+                include: {
+                  images: true,
+                }
+              }
+            }
+          },
           return: true,
+          review: {
+            select: {
+              id: true,
+              status: true,
+              rating: true,
+              title: true,
+              comment: true,
+              rejectionReason: true,
+              reviewedAt: true,
+            }
+          }
         }
       },
       payments: true,
@@ -882,8 +1101,28 @@ export async function getOrderById(orderId: string) {
     include: {
       orderItems: {
         include: {
-          sku: true,
+          sku: {
+            include: {
+              images: true,
+              product: {
+                include: {
+                  images: true,
+                }
+              }
+            }
+          },
           return: true,
+          review: {
+            select: {
+              id: true,
+              status: true,
+              rating: true,
+              title: true,
+              comment: true,
+              rejectionReason: true,
+              reviewedAt: true,
+            }
+          }
         }
       },
       payments: true,
@@ -936,7 +1175,16 @@ export async function getAllOrders(page: number = 1, limit: number = 20, search?
       include: {
         orderItems: {
           include: {
-            sku: true,
+            sku: {
+              include: {
+                images: true,
+                product: {
+                  include: {
+                    images: true,
+                  }
+                }
+              }
+            },
             return: true,
           }
         },

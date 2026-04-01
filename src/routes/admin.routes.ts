@@ -4,11 +4,18 @@ import { getMe } from '../controllers/admin.controller.js';
 import { getDashboard } from '../controllers/dashboard.controller.js';
 import { createCategoryController, listCategoriesController, updateCategoryController } from '../controllers/category.controller.js';
 import { createSubcategoryController, listSubcategoriesController, updateSubcategoryController } from '../controllers/subcategory.controller.js';
-import { createProductController, addProductImageController, listProductsController } from '../controllers/product.controller.js';
-import { createSkuController, getSkuInventoryController, updateSkuStockController, addSkuImageController, listSkusController } from '../controllers/sku.controller.js';
+import { createProductController, addProductImageController, listProductsController, updateProductController } from '../controllers/product.controller.js';
+import { createSkuController, updateSkuController, getSkuInventoryController, updateSkuStockController, addSkuImageController, listSkusController, listSkuImagesController, deleteSkuImageController, reorderSkuImagesController } from '../controllers/sku.controller.js';
 import { approveOrderController, putOrderOnHoldController, cancelOrderController, markOrderAsShippedController, markOrderAsDeliveredController, listOrdersController, cleanupStaleOrdersController } from '../controllers/order.controller.js';
 import { listReturnRequestsController, approveReturnController, rejectReturnController, markReturnReceivedController } from '../controllers/return.controller.js';
+import { listAdminReviewsController, approveReviewController, rejectReviewController } from '../controllers/review.controller.js';
 import { initiateRefundController } from '../controllers/refund.controller.js';
+import {
+    createCouponController,
+    listCouponsController,
+    updateCouponController,
+    toggleCouponController
+} from '../controllers/coupon.controller.js';
 import { adminAuth } from '../middlewares/adminAuth.middleware.js';
 
 const router = Router();
@@ -41,14 +48,19 @@ router.put('/subcategories/:id', updateSubcategoryController);
 // Product management
 router.post('/products', createProductController);
 router.get('/products', listProductsController);
+router.put('/products/:productId', updateProductController);
 router.post('/products/:productId/images', addProductImageController);
 
 // SKU management
 router.get('/skus', listSkusController);
 router.post('/skus', createSkuController);
+router.put('/skus/:skuId', updateSkuController);
 router.get('/skus/:skuId/inventory', getSkuInventoryController);
 router.patch('/skus/:skuId/stock', updateSkuStockController);
 router.post('/skus/:skuId/images', addSkuImageController);
+router.get('/skus/:skuId/images', listSkuImagesController);
+router.delete('/skus/:skuId/images/:imageId', deleteSkuImageController);
+router.patch('/skus/:skuId/images/reorder', reorderSkuImagesController);
 
 // Order management
 router.get('/orders', listOrdersController);
@@ -65,6 +77,17 @@ router.get('/returns', listReturnRequestsController);
 router.post('/returns/:returnId/approve', approveReturnController);
 router.post('/returns/:returnId/reject', rejectReturnController);
 router.post('/returns/:returnId/receive', markReturnReceivedController);
+
+// Reviews moderation
+router.get('/reviews', listAdminReviewsController);
+router.patch('/reviews/:reviewId/approve', approveReviewController);
+router.patch('/reviews/:reviewId/reject', rejectReviewController);
+
+// Coupons
+router.post('/coupons', createCouponController);
+router.get('/coupons', listCouponsController);
+router.put('/coupons/:id', updateCouponController);
+router.patch('/coupons/:id/toggle', toggleCouponController);
 
 export default router;
 

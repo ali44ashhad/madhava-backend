@@ -17,6 +17,14 @@ type TransactionClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0
  */
 export async function generateOrderNumber(tx?: TransactionClient): Promise<string> {
   const client = tx || prisma;
+  
+  if (tx) {
+    // Acquire a transaction-level explicit advisory lock (ID 1001) to globally 
+    // serialize concurrent order number generations in PostgreSQL.
+    // This absolutely prevents the "Unique constraint failed on orderNumber" bug.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(1001)`;
+  }
+
   const today = new Date();
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
   const prefix = `ORD${dateStr}`;

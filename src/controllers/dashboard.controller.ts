@@ -7,10 +7,11 @@ import { getDashboardMetrics } from '../services/dashboard.service.js';
  * GET /api/v1/admin/dashboard
  * Protected by admin auth middleware
  */
-export async function getDashboard(_req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function getDashboard(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
         // Service call to get metrics
-        const metrics = await getDashboardMetrics();
+        const preset = typeof req.query.preset === 'string' ? req.query.preset : undefined;
+        const metrics = await getDashboardMetrics({ preset });
 
         // Standardized response
         const response = createSuccessResponse(metrics);

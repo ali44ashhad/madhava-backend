@@ -1,4 +1,7 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
+import { env } from './env.js';
 
 /**
  * Prisma Client singleton instance
@@ -15,6 +18,11 @@ const globalForPrisma = globalThis as unknown as {
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
+    adapter: new PrismaPg(
+      new Pool({
+        connectionString: env.databaseUrl,
+      })
+    ),
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 

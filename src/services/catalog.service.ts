@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
+import { ReviewStatus } from '@prisma/client';
 
 /**
  * Get active categories for store
@@ -35,6 +36,10 @@ export async function getCategories() {
 export interface GetProductsParams {
   categorySlug?: string;
   subcategorySlug?: string;
+  maxPrice?: number;
+  q?: string;
+  isFeatured?: boolean;
+  sort?: string;
   page?: number;
   limit?: number;
 }
@@ -50,6 +55,8 @@ export interface PaginatedProductsResponse {
     subcategoryId: string;
     minPrice: number;
     maxPrice: number;
+    ratingAverage: number;
+    ratingCount: number;
     featuredImageUrl: string | null;
   }>;
   pagination: {
@@ -85,6 +92,27 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
     },
   };
 
+  // Price filter (maxPrice) on effective SKU price (festivePrice if set, else sellingPrice)
+  if (params.maxPrice !== undefined) {
+    const maxPrice = params.maxPrice;
+    where.skus.some = {
+      ...where.skus.some,
+      AND: [
+        {
+          OR: [
+            { festivePrice: { lte: maxPrice } },
+            { AND: [{ festivePrice: { equals: null } }, { sellingPrice: { lte: maxPrice } }] },
+          ],
+        },
+      ],
+    };
+  }
+
+  // Add isFeatured filter if provided
+  if (params.isFeatured !== undefined) {
+    where.isFeatured = params.isFeatured;
+  }
+
   // Add category filter if provided
   if (params.categorySlug) {
     where.category = {
@@ -101,6 +129,15 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
     };
   }
 
+  // Search filter (name/category/subcategory)
+  if (params.q) {
+    where.OR = [
+      { name: { contains: params.q, mode: 'insensitive' } },
+      { category: { name: { contains: params.q, mode: 'insensitive' } } },
+      { subcategory: { name: { contains: params.q, mode: 'insensitive' } } },
+    ];
+  }
+
   // Get total count for pagination
   const total = await prisma.product.count({ where });
 
@@ -114,8 +151,14 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
       name: true,
       description: true,
       isFeatured: true,
+      featuredImageUrl: true,
       categoryId: true,
       subcategoryId: true,
+      category: {
+        select: {
+          name: true,
+        },
+      },
       images: {
         take: 1,
         select: {
@@ -135,16 +178,45 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
         select: {
           sellingPrice: true,
           festivePrice: true,
+          mrp: true,
         },
       },
     },
-    orderBy: {
-      createdAt: 'desc',
-    },
+    orderBy:
+      params.sort === 'oldest'
+        ? { createdAt: 'asc' as const }
+        : params.sort === 'newest' || !params.sort
+          ? { createdAt: 'desc' as const }
+          : { createdAt: 'desc' as const },
   });
 
+  // Approved-only rating aggregation for current page.
+  const productIds = products.map((p) => p.id);
+  const ratingAggRows =
+    productIds.length > 0
+      ? await prisma.review.groupBy({
+          by: ['productId'],
+          where: {
+            productId: { in: productIds },
+            status: ReviewStatus.APPROVED,
+          },
+          _avg: { rating: true },
+          _count: { id: true },
+        })
+      : [];
+
+  const ratingMap = new Map<string, { ratingAverage: number; ratingCount: number }>(
+    ratingAggRows.map((row) => [
+      row.productId,
+      {
+        ratingAverage: row._avg.rating ?? 0,
+        ratingCount: row._count.id,
+      },
+    ])
+  );
+
   // Transform products to include min/max prices and featured image
-  const transformedProducts = products.map((product) => {
+  let transformedProducts = products.map((product) => {
     const prices = product.skus
       .map((sku) => {
         // Use festivePrice if available, otherwise sellingPrice
@@ -153,8 +225,15 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
       })
       .filter((price) => !isNaN(price));
 
+    const mrps = product.skus
+      .map((sku) => Number(sku.mrp))
+      .filter((m) => !isNaN(m));
+
     const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
     const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+    const maxMrp = mrps.length > 0 ? Math.max(...mrps) : 0;
+
+    const rating = ratingMap.get(product.id) ?? { ratingAverage: 0, ratingCount: 0 };
 
     return {
       id: product.id,
@@ -164,11 +243,28 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
       isFeatured: product.isFeatured,
       categoryId: product.categoryId,
       subcategoryId: product.subcategoryId,
+      categoryName: product.category?.name || null,
       minPrice,
       maxPrice,
-      featuredImageUrl: product.images[0]?.imageUrl || null,
+      maxMrp,
+      ratingAverage: rating.ratingAverage,
+      ratingCount: rating.ratingCount,
+      featuredImageUrl: product.featuredImageUrl ?? product.images[0]?.imageUrl ?? null,
     };
   });
+
+  // Server-side sort modes (applied after enrichment).
+  if (params.sort === 'priceLow') {
+    transformedProducts.sort((a, b) => (a.minPrice ?? 0) - (b.minPrice ?? 0));
+  } else if (params.sort === 'priceHigh') {
+    transformedProducts.sort((a, b) => (b.minPrice ?? 0) - (a.minPrice ?? 0));
+  } else if (params.sort === 'popularity') {
+    transformedProducts.sort((a, b) => {
+      const ra = b.ratingAverage - a.ratingAverage;
+      if (ra !== 0) return ra;
+      return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
+    });
+  }
 
   const totalPages = Math.ceil(total / limit);
 
@@ -187,7 +283,10 @@ export async function getProducts(params: GetProductsParams): Promise<PaginatedP
 
 /**
  * Get product detail by ID
- * Returns full product info with images and active SKUs
+ * Returns full product info with images and all active SKUs (including out-of-stock).
+ * Store listings still only show products that have at least one in-stock SKU; this
+ * endpoint includes OOS variants so the PDP can show them with overlays/disabled CTAs.
+ * Deep links still work when every variant is OOS (at least one active SKU must exist).
  */
 export async function getProductDetail(productId: string) {
   logger.info('Fetching product detail', { productId });
@@ -195,6 +294,7 @@ export async function getProductDetail(productId: string) {
   const product = await prisma.product.findUnique({
     where: { id: productId },
     include: {
+      // include featuredImageUrl (scalar) by default in result
       category: {
         select: {
           id: true,
@@ -222,9 +322,6 @@ export async function getProductDetail(productId: string) {
       skus: {
         where: {
           isActive: true,
-          stockQuantity: {
-            gt: 0,
-          },
         },
         select: {
           id: true,
@@ -261,20 +358,35 @@ export async function getProductDetail(productId: string) {
     throw new AppError('NOT_FOUND', `Product with id '${productId}' not found`, 404);
   }
 
-  // Only return product if it's active and has at least one active SKU in stock
+  // Only return product if it's active and has at least one active SKU (in stock or not)
   if (!product.isActive) {
     logger.warn('Product is not active', { productId });
     throw new AppError('NOT_FOUND', `Product with id '${productId}' not found`, 404);
   }
 
   if (product.skus.length === 0) {
-    logger.warn('Product has no active SKUs in stock', { productId });
+    logger.warn('Product has no active SKUs', { productId });
     throw new AppError('NOT_FOUND', `Product with id '${productId}' not found`, 404);
   }
 
   logger.info('Product detail retrieved', { productId, skuCount: product.skus.length });
 
-  return product;
+  // Approved-only rating aggregation
+  const ratingAgg = await prisma.review.aggregate({
+    where: { productId, status: ReviewStatus.APPROVED },
+    _avg: { rating: true },
+    _count: { id: true },
+  });
+
+  const ratingAverage = ratingAgg._avg.rating ?? 0;
+  const ratingCount = ratingAgg._count.id;
+
+  return {
+    ...product,
+    featuredImageUrl: product.featuredImageUrl ?? product.images?.[0]?.imageUrl ?? null,
+    ratingAverage,
+    ratingCount,
+  };
 }
 
 /**

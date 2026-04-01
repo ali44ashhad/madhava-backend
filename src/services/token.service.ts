@@ -7,6 +7,7 @@ const ACCESS_TOKEN_SECRET = process.env.CUSTOMER_JWT_SECRET || 'access-secret';
 const REFRESH_TOKEN_SECRET = process.env.CUSTOMER_REFRESH_SECRET || 'refresh-secret'; // Used for hashing generally
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
+const REFRESH_ROTATION_GRACE_SECONDS = Number(process.env.REFRESH_ROTATION_GRACE_SECONDS || 60);
 
 export const generateAccessToken = (customerId: string): string => {
     const payload: Omit<AccessTokenPayload, 'iat' | 'exp'> = {
@@ -72,15 +73,43 @@ export const revokeSession = async (token: string): Promise<void> => {
 };
 
 export const rotateRefreshToken = async (oldToken: string): Promise<{ newAccessToken: string; newRefreshToken: string } | null> => {
-    const customerId = await verifyRefreshToken(oldToken);
-    if (!customerId) return null;
+    // Inline validation so we can also apply a grace window to the old session.
+    const oldHash = crypto
+        .createHmac('sha256', REFRESH_TOKEN_SECRET)
+        .update(oldToken)
+        .digest('hex');
 
-    // Revoke old
-    await revokeSession(oldToken);
+    const session = await prisma.customerSession.findFirst({
+        where: { tokenHash: oldHash },
+    });
 
-    // Issue new
-    const newAccessToken = generateAccessToken(customerId);
-    const newRefreshToken = await generateRefreshToken(customerId);
+    if (!session) return null;
+    if (new Date() > session.expiresAt) {
+        await prisma.customerSession.delete({ where: { id: session.id } });
+        return null;
+    }
+
+    // Issue new tokens first (so even if the grace-update fails, user still gets a new token).
+    const newAccessToken = generateAccessToken(session.customerId);
+    const newRefreshToken = await generateRefreshToken(session.customerId);
+
+    // Rotation grace window:
+    // Instead of deleting the old session immediately, keep it valid briefly so parallel refresh
+    // calls (or slow Set-Cookie persistence) don't log the user out.
+    //
+    // We implement grace without a schema change by shortening old `expiresAt`.
+    const graceMs = Math.max(0, REFRESH_ROTATION_GRACE_SECONDS) * 1000;
+    if (graceMs > 0) {
+        const graceExpiry = new Date(Date.now() + graceMs);
+        const newOldExpiry = graceExpiry < session.expiresAt ? graceExpiry : session.expiresAt;
+        await prisma.customerSession.update({
+            where: { id: session.id },
+            data: { expiresAt: newOldExpiry },
+        });
+    } else {
+        // If grace is disabled, behave like strict rotation.
+        await prisma.customerSession.delete({ where: { id: session.id } });
+    }
 
     return { newAccessToken, newRefreshToken };
 };

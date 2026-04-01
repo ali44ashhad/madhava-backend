@@ -30,8 +30,16 @@ export function createApp(): Express {
   app.use(express.json());
 
   // 2. CORS
+  const defaultOrigins = ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5015', 'http://localhost:5016', 'http://192.168.1.40:5015'];
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const allowedOrigins = configuredOrigins.length > 0 ? configuredOrigins : defaultOrigins;
+
   app.use(cors({
-    origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5015', 'http://localhost:5016'],
+    origin: allowedOrigins,
     credentials: true,
   }));
 

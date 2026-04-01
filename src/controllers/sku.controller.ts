@@ -1,9 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { createSku, CreateSkuInput, getSkuInventory, updateSkuStock } from '../services/sku.service.js';
+import {
+  createSku,
+  CreateSkuInput,
+  getSkuInventory,
+  updateSku,
+  UpdateSkuInput,
+  updateSkuStock,
+  addSkuImage,
+  getAllSkus,
+  listSkuImages,
+  deleteSkuImage,
+  reorderSkuImages,
+} from '../services/sku.service.js';
 import { createSuccessResponse } from '../types/api-response.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
+
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Zod schema for create SKU request body
@@ -37,6 +51,27 @@ const updateStockSchema = z.object({
   operation: z.enum(['INCREMENT', 'DECREMENT'], {
     message: 'Operation must be INCREMENT or DECREMENT',
   }),
+});
+
+const updateSkuSchema = z.object({
+  skuCode: z.string().min(1, 'SKU code is required').optional(),
+  productId: z.string().uuid('Invalid product ID format').optional(),
+  size: z.string().optional(),
+  weight: z.string().optional(),
+  material: z.string().optional(),
+  color: z.string().optional(),
+  mrp: z.number().positive('MRP must be greater than 0').optional(),
+  sellingPrice: z.number().positive('Selling price must be greater than 0').optional(),
+  festivePrice: z.number().positive('Festive price must be greater than 0').nullable().optional(),
+  gstPercent: z.number().min(0, 'GST percent must be at least 0').max(100, 'GST percent must be at most 100').optional(),
+  isCodAllowed: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+  countryOfOrigin: z.string().min(1, 'Country of origin is required').optional(),
+  manufacturerName: z.string().min(1, 'Manufacturer name is required').optional(),
+  manufacturerAddress: z.string().min(1, 'Manufacturer address is required').optional(),
+  sellerName: z.string().min(1, 'Seller name is required').optional(),
+  sellerAddress: z.string().min(1, 'Seller address is required').optional(),
+  sellerPincode: z.string().min(1, 'Seller pincode is required').optional(),
 });
 
 /**
@@ -92,6 +127,38 @@ export async function createSkuController(
 }
 
 /**
+ * Update SKU controller
+ * PUT /api/v1/admin/skus/:skuId
+ */
+export async function updateSkuController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { skuId } = req.params;
+    logger.info('Update SKU request received', { skuId });
+
+    if (!uuidRegex.test(skuId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid SKU ID format. Expected UUID', 400);
+    }
+
+    const validationResult = updateSkuSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    const input: UpdateSkuInput = validationResult.data;
+    const updated = await updateSku(skuId, input);
+    res.status(200).json(createSuccessResponse(updated));
+  } catch (error) {
+    logger.error('Error in update SKU controller', error);
+    next(error);
+  }
+}
+
+/**
  * Get SKU inventory controller
  * GET /api/v1/admin/skus/:skuId/inventory
  */
@@ -105,7 +172,6 @@ export async function getSkuInventoryController(
     logger.info('Get SKU inventory request received', { skuId });
 
     // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(skuId)) {
       throw new AppError('VALIDATION_ERROR', 'Invalid SKU ID format. Expected UUID', 400);
     }
@@ -141,7 +207,6 @@ export async function updateSkuStockController(
     }
 
     // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(skuId)) {
       throw new AppError('VALIDATION_ERROR', 'Invalid SKU ID format. Expected UUID', 400);
     }
@@ -179,6 +244,20 @@ const addSkuImageSchema = z.object({
   sortOrder: z.number().int().optional().default(0),
 });
 
+const reorderSkuImagesSchema = z.object({
+  updates: z
+    .array(
+      z.object({
+        id: z.string().uuid('Invalid image ID format'),
+        sortOrder: z
+          .number()
+          .int('Sort order must be an integer')
+          .min(0, 'Sort order must be at least 0'),
+      })
+    )
+    .min(1, 'At least one update is required'),
+});
+
 /**
  * Add SKU image controller
  * POST /api/v1/admin/skus/:skuId/images
@@ -199,47 +278,102 @@ export async function addSkuImageController(
       throw new AppError('VALIDATION_ERROR', errorMessages, 400);
     }
 
-    // Call service to add image
-    // Note: addSkuImage is not imported yet, strict mode might complain if I don't import it.
-    // I will assume I need to update imports in a separate step or try to do it here if possible.
-    // Since I can't easily do multiple chunks with replace_file_content in one go without multi_replace, 
-    // I'll stick to adding the function here and update imports in next step.
-
-    // Actually, I should use multi_replace for controller file to handle import and new function.
-    // But I'm forced to use replace_file_content since I'm appending. 
-    // Wait, the agent tools allow multi_replace. I should use that for the controller.
-
-    // Re-reading the plan: "Implement addSkuImageController in sku.controller.ts".
-    // I will use replace_file_content to append the function now, and then another call to update the import.
-
-    // wait, I can't easily see where to import without reading the file again or guessing.
-    // I see the file content in context. Line 3 has imports.
-
-    // I'll just append the controller code for now.
-
-    // ... wait, I need to call the service function. 
-    // const image = await addSkuImage(skuId, validationResult.data.imageUrl, validationResult.data.sortOrder);
-
-    // I'll write the function assuming the import is there, then fix the import.
-
-    // ... actually, let's look at the imports in sku.controller.ts
-    // import { createSku, CreateSkuInput, getSkuInventory, updateSkuStock } from '../services/sku.service.js';
-
-    // I will append the controller at the end.
-
-    // ... constructing replacement content ...
-
-    const image = await import('../services/sku.service.js').then(m => m.addSkuImage(
+    const image = await addSkuImage(
       skuId,
       validationResult.data.imageUrl,
       validationResult.data.sortOrder
-    ));
+    );
 
     // Return success response
     const response = createSuccessResponse(image);
     res.status(201).json(response);
   } catch (error) {
     logger.error('Error in add SKU image controller', error);
+    next(error);
+  }
+}
+
+/**
+ * List SKU images controller
+ * GET /api/v1/admin/skus/:skuId/images
+ */
+export async function listSkuImagesController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { skuId } = req.params;
+    logger.info('List SKU images request received', { skuId });
+
+    if (!uuidRegex.test(skuId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid SKU ID format. Expected UUID', 400);
+    }
+
+    const images = await listSkuImages(skuId);
+    res.status(200).json(createSuccessResponse(images));
+  } catch (error) {
+    logger.error('Error in list SKU images controller', error);
+    next(error);
+  }
+}
+
+/**
+ * Delete SKU image controller
+ * DELETE /api/v1/admin/skus/:skuId/images/:imageId
+ */
+export async function deleteSkuImageController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { skuId, imageId } = req.params;
+    logger.info('Delete SKU image request received', { skuId, imageId });
+
+    if (!uuidRegex.test(skuId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid SKU ID format. Expected UUID', 400);
+    }
+
+    if (!uuidRegex.test(imageId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid image ID format. Expected UUID', 400);
+    }
+
+    const result = await deleteSkuImage(skuId, imageId);
+    res.status(200).json(createSuccessResponse(result));
+  } catch (error) {
+    logger.error('Error in delete SKU image controller', error);
+    next(error);
+  }
+}
+
+/**
+ * Reorder SKU images controller
+ * PATCH /api/v1/admin/skus/:skuId/images/reorder
+ */
+export async function reorderSkuImagesController(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { skuId } = req.params;
+    logger.info('Reorder SKU images request received', { skuId });
+
+    if (!uuidRegex.test(skuId)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid SKU ID format. Expected UUID', 400);
+    }
+
+    const validationResult = reorderSkuImagesSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => issue.message).join(', ');
+      throw new AppError('VALIDATION_ERROR', errorMessages, 400);
+    }
+
+    const images = await reorderSkuImages(skuId, validationResult.data.updates);
+    res.status(200).json(createSuccessResponse(images));
+  } catch (error) {
+    logger.error('Error in reorder SKU images controller', error);
     next(error);
   }
 }
@@ -258,13 +392,15 @@ export async function listSkusController(
     const limit = Number(req.query.limit) || 20;
     const search = req.query.search as string;
     const stock = req.query.stock as string;
+    const rawProductId = req.query.productId;
+    const productId =
+      typeof rawProductId === 'string' && uuidRegex.test(rawProductId)
+        ? rawProductId
+        : undefined;
 
-    logger.info('List SKUs request received', { page, limit, search, stock });
+    logger.info('List SKUs request received', { page, limit, search, stock, productId });
 
-    // Call service to get SKUs
-    // Dynamic import to avoid top-level import issues if I can't easily edit top of file
-    const { getAllSkus } = await import('../services/sku.service.js');
-    const result = await getAllSkus(page, limit, search, stock);
+    const result = await getAllSkus(page, limit, search, stock, productId);
 
     // Return success response
     const response = createSuccessResponse(result);

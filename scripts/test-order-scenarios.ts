@@ -525,6 +525,9 @@ async function run() {
                 pricePerUnit: 400,
                 gstPercent: 18,
                 totalPrice: 400,
+                discountAmount: 0,
+                netTotalPrice: 400,
+                netPricePerUnit: 400,
                 skuSnapshot: { productName: 'Test', skuCode: 'TEST-SKU-001' },
             },
         });

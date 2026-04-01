@@ -34,13 +34,23 @@ export async function initiateRefundController(
       throw new AppError('UNAUTHORIZED', 'Admin information not found', 401);
     }
 
+    // Optional partial refund amount
+    const amountRaw = req.body?.amount;
+    const hasAmount = amountRaw !== undefined;
+    const parsedAmount = hasAmount ? Number(amountRaw) : 0;
+
+    if (hasAmount && (Number.isNaN(parsedAmount) || parsedAmount <= 0)) {
+      throw new AppError('VALIDATION_ERROR', 'Invalid refund amount', 400);
+    }
+
     logger.info('Initiate refund request received', {
       orderId,
       adminId: req.admin.id,
+      amount: hasAmount ? parsedAmount : 'FULL',
     });
 
-    // Call service to initiate refund
-    const result = await initiateRefund(orderId, req.admin.id);
+    // Call service to initiate refund (full or partial)
+    const result = await initiateRefund(orderId, req.admin.id, hasAmount ? parsedAmount : undefined);
 
     logger.info('Refund initiated successfully', {
       refundId: result.refundId,

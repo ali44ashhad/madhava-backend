@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { Prisma } from '@prisma/client';
 
 /**
  * Create customer input
@@ -80,7 +80,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Create
     };
   } catch (error) {
     // Handle unique constraint violation (fallback, though we check above)
-    if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       logger.warn('Customer creation failed due to unique constraint', {
         email: input.email,
         code: error.code,
