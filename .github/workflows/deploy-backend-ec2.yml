@@ -1,0 +1,69 @@
+name: Deploy backend to EC2
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: backend-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          script: |
+            set -euo pipefail
+
+            APP_DIR="${APP_DIR:-/home/ubuntu/apps/madhav-gopal-server}"
+            SERVICE="${SERVICE_NAME:-madhav-gopal-server}"
+
+            echo "Deploying to: ${APP_DIR}"
+            cd "${APP_DIR}"
+
+            echo "Pull latest main"
+            git fetch origin
+            git reset --hard origin/main
+
+            echo "Install deps"
+            # Prefer npm ci when package-lock is in sync; otherwise fallback.
+            if npm ci; then
+              echo "npm ci ok"
+            else
+              echo "npm ci failed; falling back to npm install"
+              npm install
+            fi
+
+            echo "Prisma: generate + deploy migrations"
+            # Prisma config in this repo requires DATABASE_URL; we load it from the server env file.
+            rm -f .env
+            sudo cp /etc/madhav-gopal/server.env .env
+            sudo chown ubuntu:ubuntu .env
+            chmod 600 .env
+
+            # Avoid a shell-exported DATABASE_URL overriding .env in case it exists.
+            unset DATABASE_URL || true
+
+            npx prisma generate
+            npx prisma migrate deploy
+
+            rm -f .env
+
+            echo "Build"
+            npm run build
+
+            echo "Restart service"
+            sudo systemctl restart "${SERVICE}"
+            sudo systemctl status "${SERVICE}" --no-pager
+
+            echo "Smoke test"
+            curl -fsS "http://127.0.0.1:5012/health" >/dev/null
+            echo "OK"
