@@ -45,8 +45,10 @@ export async function listCouponsController(req: Request, res: Response, next: N
         const page = parseInt(req.query.page as string) || 1;
         const limit = parseInt(req.query.limit as string) || 20;
         const search = req.query.search as string;
+        const isActiveRaw = req.query.isActive as string | undefined;
+        const isActive = isActiveRaw === undefined ? undefined : isActiveRaw === 'true';
 
-        const result = await couponService.listCoupons(page, limit, search);
+        const result = await couponService.listCoupons(page, limit, search, isActive);
         res.status(200).json({
             success: true,
             data: result

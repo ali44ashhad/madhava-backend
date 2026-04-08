@@ -43,17 +43,20 @@ export async function createCoupon(input: CreateCouponInput) {
     return coupon;
 }
 
-export async function listCoupons(page = 1, limit = 20, search?: string) {
+export async function listCoupons(page = 1, limit = 20, search?: string, isActive?: boolean) {
     const skip = (page - 1) * limit;
 
-    const where: Prisma.CouponWhereInput = search
-        ? {
-            OR: [
-                { code: { contains: search, mode: 'insensitive' } },
-                { description: { contains: search, mode: 'insensitive' } },
-            ],
-        }
-        : {};
+    const where: Prisma.CouponWhereInput = {
+        ...(typeof isActive === 'boolean' ? { isActive } : {}),
+        ...(search
+            ? {
+                OR: [
+                    { code: { contains: search, mode: 'insensitive' } },
+                    { description: { contains: search, mode: 'insensitive' } },
+                ],
+            }
+            : {}),
+    };
 
     const [coupons, total] = await Promise.all([
         prisma.coupon.findMany({
