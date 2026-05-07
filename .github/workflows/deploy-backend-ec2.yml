@@ -64,6 +64,15 @@ jobs:
             sudo systemctl restart "${SERVICE}"
             sudo systemctl status "${SERVICE}" --no-pager
 
-            echo "Smoke test"
-            curl -fsS "http://127.0.0.1:5012/health" >/dev/null
-            echo "OK"
+            echo "Smoke test (retry up to 30s)"
+            for i in {1..30}; do
+              if curl -fsS "http://127.0.0.1:5012/health" >/dev/null; then
+                echo "OK"
+                exit 0
+              fi
+              sleep 1
+            done
+
+            echo "Health check failed after retries"
+            sudo journalctl -u "${SERVICE}" -n 200 --no-pager
+            exit 1

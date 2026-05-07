@@ -6,6 +6,7 @@ import { createAddressController, getCustomerAddressesController, updateAddressC
 import { requestReturnController } from '../controllers/return.controller.js';
 import { validateCouponController } from '../controllers/coupon.controller.js';
 import { createReviewController, updateReviewController, listApprovedProductReviewsController } from '../controllers/review.controller.js';
+import { initiateRazorpayController } from '../controllers/payment.controller.js';
 
 const router = Router();
 
@@ -46,6 +47,9 @@ router.patch('/reviews/:reviewId', customerAuthMiddleware, updateReviewControlle
 
 // Coupons
 router.post('/coupons/validate', customerAuthMiddleware, validateCouponController);
+
+// Payments — lightweight Razorpay session initiation (no DB writes)
+router.post('/payments/razorpay/initiate', customerAuthMiddleware, initiateRazorpayController);
 
 // Approved product reviews
 router.get('/products/:productId/reviews', listApprovedProductReviewsController);

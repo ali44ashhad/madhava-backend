@@ -3,8 +3,9 @@ import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
 import { generateOrderNumber } from '../utils/order-number.js';
 import { Prisma, PaymentMethod, PaymentStatus, OrderStatus } from '@prisma/client';
-import { razorpay } from '../config/index.js';
 import { validateCoupon } from './coupon.service.js';
+import { env } from '../config/env.js';
+import crypto from 'crypto';
 
 function roundToPaise(amount: number) {
   return Math.round(amount * 100) / 100;
@@ -126,9 +127,12 @@ export interface PlaceOrderInput {
   customerId: string;
   addressId: string;
   paymentMethod: PaymentMethod;
-  paymentReference?: string;
   items: PlaceOrderItem[];
   couponCode?: string;
+  // Required for RAZORPAY orders — returned by Razorpay handler after payment
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;   // The Razorpay order_id from the initiate step
+  razorpaySignature?: string; // HMAC-SHA256 proof of payment
 }
 
 /**
@@ -138,7 +142,6 @@ export interface PlaceOrderResult {
   orderId: string;
   orderNumber: string;
   status: OrderStatus;
-  razorpayOrderId?: string;
 }
 
 /**
@@ -169,6 +172,36 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     paymentMethod: input.paymentMethod,
     itemCount: input.items.length,
   });
+
+  // For Razorpay orders, verify the payment signature BEFORE any DB writes.
+  // This is the cryptographic proof that the user actually paid.
+  if (input.paymentMethod === PaymentMethod.RAZORPAY) {
+    if (!input.razorpayPaymentId || !input.razorpayOrderId || !input.razorpaySignature) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'razorpayPaymentId, razorpayOrderId, and razorpaySignature are required for RAZORPAY orders',
+        400
+      );
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', env.razorpayKeySecret)
+      .update(`${input.razorpayOrderId}|${input.razorpayPaymentId}`)
+      .digest('hex');
+
+    if (expectedSignature !== input.razorpaySignature) {
+      logger.warn('Razorpay signature verification failed', {
+        customerId: input.customerId,
+        razorpayOrderId: input.razorpayOrderId,
+      });
+      throw new AppError('FORBIDDEN', 'Payment signature verification failed', 403);
+    }
+
+    logger.info('Razorpay payment signature verified successfully', {
+      razorpayOrderId: input.razorpayOrderId,
+      razorpayPaymentId: input.razorpayPaymentId,
+    });
+  }
 
   // Pre-transaction validations
   await validateOrderInput(input);
@@ -357,10 +390,14 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
 
     const totalAmount = subtotalAmount - discountAmount + codFee;
 
-    // Determine payment status
-    // Both COD and RAZORPAY should initially be PENDING
-    // COD is paid on delivery, RAZORPAY is verified via webhook
-    const paymentStatus = PaymentStatus.PENDING;
+    // Determine payment status:
+    // - COD: PENDING (paid on delivery)
+    // - RAZORPAY: PAID immediately — signature was verified before the transaction,
+    //   so we know the payment was captured by Razorpay.
+    const paymentStatus =
+      input.paymentMethod === PaymentMethod.RAZORPAY
+        ? PaymentStatus.PAID
+        : PaymentStatus.PENDING;
 
     // Fetch address for snapshot
     const address = await tx.address.findUnique({
@@ -458,35 +495,14 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       itemCount: orderItemsData.length,
     });
 
-    let razorpayOrderId: string | undefined;
-
-    // Create Razorpay order if method is RAZORPAY
-    if (input.paymentMethod === PaymentMethod.RAZORPAY) {
-      if (!razorpay) {
-        throw new AppError('INTERNAL_SERVER_ERROR', 'Razorpay is not configured on the server', 500);
-      }
-      try {
-        const rpOrder = await razorpay.orders.create({
-          amount: Math.round(totalAmount * 100), // Amount in paise
-          currency: 'INR',
-          receipt: orderNumber,
-        });
-        razorpayOrderId = rpOrder.id;
-        console.log("[DEBUG:]Razorpay order ", rpOrder);
-
-        logger.info('Razorpay order created', { orderId: order.id, razorpayOrderId });
-      } catch (error) {
-        logger.error('Failed to create Razorpay order', { error, orderId: order.id });
-        throw new AppError('INTERNAL_SERVER_ERROR', 'Failed to initialize payment gateway', 500);
-      }
-    }
-
-    // Create payment record
+    // Create payment record.
+    // For RAZORPAY: reference = razorpayPaymentId (the actual captured payment).
+    // For COD: reference is null.
     await tx.payment.create({
       data: {
         orderId: order.id,
         provider: input.paymentMethod,
-        reference: razorpayOrderId || input.paymentReference,
+        reference: input.razorpayPaymentId ?? null,
         amount: new Prisma.Decimal(totalAmount),
         status: paymentStatus,
       },
@@ -502,7 +518,6 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
       orderId: order.id,
       orderNumber: order.orderNumber,
       status: order.status,
-      razorpayOrderId,
     };
   });
 

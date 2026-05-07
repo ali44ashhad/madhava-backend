@@ -15,7 +15,6 @@ const placeOrderSchema = z.object({
   paymentMethod: z.enum(['RAZORPAY', 'COD'], {
     message: 'Payment method must be RAZORPAY or COD',
   }),
-  paymentReference: z.string().nullable().optional(),
   items: z
     .array(
       z.object({
@@ -25,6 +24,10 @@ const placeOrderSchema = z.object({
     )
     .min(1, 'At least one item is required'),
   couponCode: z.string().optional(),
+  // Razorpay-specific fields (required when paymentMethod === 'RAZORPAY')
+  razorpayPaymentId: z.string().optional(),
+  razorpayOrderId: z.string().optional(),
+  razorpaySignature: z.string().optional(),
 });
 
 /**
@@ -57,7 +60,7 @@ export async function placeOrderController(
       throw new AppError('VALIDATION_ERROR', errorMessages, 400);
     }
 
-    const { addressId, paymentMethod, paymentReference, items, couponCode } = validationResult.data;
+    const { addressId, paymentMethod, items, couponCode, razorpayPaymentId, razorpayOrderId, razorpaySignature } = validationResult.data;
     const customerId = req.customer.id;
 
     logger.info('Validation passed, calling place order service', {
@@ -72,9 +75,11 @@ export async function placeOrderController(
       customerId,
       addressId,
       paymentMethod,
-      paymentReference: paymentReference ?? undefined,
       items,
       couponCode,
+      razorpayPaymentId,
+      razorpayOrderId,
+      razorpaySignature,
     });
 
     logger.info('Order placed successfully', {
@@ -87,7 +92,6 @@ export async function placeOrderController(
       orderId: result.orderId,
       orderNumber: result.orderNumber,
       status: result.status,
-      razorpayOrderId: result.razorpayOrderId,
     });
 
     res.status(201).json(response);
