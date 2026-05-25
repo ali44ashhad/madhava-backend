@@ -1,7 +1,12 @@
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middlewares/error.middleware.js';
 import { logger } from '../utils/logger.js';
-import { Prisma } from '@prisma/client';
+import { OrderStatus, Prisma, RefundStatus, ReturnStatus } from '@prisma/client';
+
+/** Prisma filter for non-deleted customers */
+export const activeCustomerWhere = { deletedAt: null } as const;
+
+const DELETED_USER_NAME = 'Deleted User';
 
 /**
  * Create customer input
@@ -35,13 +40,21 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Create
     name: input.name,
   });
 
-  // Check for existing customer with case-insensitive email
+  const cleanPhone = input.phone.replace(/\D/g, '');
+
+  // Check for existing active customer with case-insensitive email or phone
   const existingCustomer = await prisma.customer.findFirst({
     where: {
-      email: {
-        equals: input.email,
-        mode: 'insensitive',
-      },
+      deletedAt: null,
+      OR: [
+        {
+          email: {
+            equals: input.email,
+            mode: 'insensitive',
+          },
+        },
+        { phone: cleanPhone },
+      ],
     },
     select: {
       id: true,
@@ -63,7 +76,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Create
       data: {
         name: input.name.trim(),
         email: input.email.toLowerCase().trim(),
-        phone: input.phone.trim(),
+        phone: cleanPhone,
       },
       select: {
         id: true,
@@ -105,8 +118,8 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Create
  * Get customer by ID
  */
 export async function getCustomerById(customerId: string) {
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, ...activeCustomerWhere },
     select: {
       id: true,
       name: true,
@@ -121,5 +134,99 @@ export async function getCustomerById(customerId: string) {
   }
 
   return customer;
+}
+
+/**
+ * Soft-delete customer account: anonymize PII, revoke sessions, clear cart/addresses.
+ * Blocked when active orders, open returns, or pending refunds exist.
+ */
+export async function softDeleteCustomer(customerId: string): Promise<void> {
+  logger.info('Soft-delete customer account request', { customerId });
+
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, deletedAt: true, phone: true },
+  });
+
+  if (!customer) {
+    throw new AppError('NOT_FOUND', 'Customer not found', 404);
+  }
+
+  if (customer.deletedAt) {
+    throw new AppError('ACCOUNT_ALREADY_DELETED', 'Account has already been deleted', 409);
+  }
+
+  const blockers: string[] = [];
+
+  const activeOrder = await prisma.order.findFirst({
+    where: {
+      customerId,
+      status: {
+        in: [
+          OrderStatus.PLACED,
+          OrderStatus.CONFIRMED,
+          OrderStatus.ON_HOLD,
+          OrderStatus.SHIPPED,
+        ],
+      },
+    },
+    select: { id: true },
+  });
+  if (activeOrder) blockers.push('ACTIVE_ORDER');
+
+  const openReturn = await prisma.return.findFirst({
+    where: {
+      status: { in: [ReturnStatus.REQUESTED, ReturnStatus.APPROVED] },
+      orderItem: { order: { customerId } },
+    },
+    select: { id: true },
+  });
+  if (openReturn) blockers.push('OPEN_RETURN');
+
+  const pendingRefund = await prisma.refund.findFirst({
+    where: {
+      status: RefundStatus.PENDING,
+      order: { customerId },
+    },
+    select: { id: true },
+  });
+  if (pendingRefund) blockers.push('PENDING_REFUND');
+
+  if (blockers.length > 0) {
+    throw new AppError(
+      'CONFLICT',
+      'Cannot delete account while you have active orders, open returns, or pending refunds',
+      409
+    );
+  }
+
+  const originalPhone = customer.phone;
+  const anonymizedEmail = `deleted+${customerId}@deleted.local`;
+  const anonymizedPhone = `deleted_${customerId}`;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.customerSession.deleteMany({ where: { customerId } });
+
+    const cart = await tx.cart.findUnique({ where: { customerId }, select: { id: true } });
+    if (cart) {
+      await tx.cart.delete({ where: { customerId } });
+    }
+
+    await tx.address.deleteMany({ where: { customerId } });
+
+    await tx.otpVerification.deleteMany({ where: { phone: originalPhone } });
+
+    await tx.customer.update({
+      where: { id: customerId },
+      data: {
+        deletedAt: new Date(),
+        name: DELETED_USER_NAME,
+        email: anonymizedEmail,
+        phone: anonymizedPhone,
+      },
+    });
+  });
+
+  logger.info('Customer account soft-deleted successfully', { customerId });
 }
 

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import * as authService from '../services/auth.service.js';
-import { getCustomerById } from '../services/customer.service.js';
+import { getCustomerById, softDeleteCustomer } from '../services/customer.service.js';
 import { z, ZodError } from 'zod';
 import { AppError } from '../middlewares/error.middleware.js';
 
@@ -24,6 +24,12 @@ const loginRequestOtpSchema = z.object({
 const loginVerifyOtpSchema = z.object({
     phone: z.string().min(10, "Phone number must be at least 10 digits"),
     otp: z.string().length(6, "OTP must be 6 digits"),
+});
+
+const deleteMyAccountSchema = z.object({
+    confirm: z.literal(true, {
+        message: 'You must confirm account deletion with confirm: true',
+    }),
 });
 
 // --- CONTROLLERS ---
@@ -113,6 +119,30 @@ export const loginVerifyOtp = async (req: Request, res: Response) => {
         }
     }
 };
+export const deleteMyAccount = async (req: Request, res: Response) => {
+    try {
+        if (!req.customer?.id) {
+            res.status(401).json({ error: 'Not authenticated' });
+            return;
+        }
+
+        deleteMyAccountSchema.parse(req.body);
+        await softDeleteCustomer(req.customer.id);
+
+        clearRefreshTokenCookie(res);
+        res.status(200).json({ message: 'Account deleted successfully' });
+    } catch (error) {
+        if (error instanceof ZodError) {
+            res.status(400).json({ error: (error as ZodError).issues });
+        } else if (error instanceof AppError) {
+            res.status(error.statusCode).json({ error: error.message });
+        } else {
+            console.error('Delete account error:', error);
+            res.status(500).json({ error: 'Failed to delete account' });
+        }
+    }
+};
+
 export const getMe = async (req: Request, res: Response) => {
     try {
         if (!req.customer?.id) {
@@ -168,7 +198,7 @@ export const refresh = async (req: Request, res: Response) => {
         // Only clear if the token is explicitly invalid or expired (401)
         // This prevents transient errors (DB connection, 500s) from logging the user out permanently
         if (error instanceof AppError && error.statusCode === 401) {
-            res.clearCookie('refreshToken');
+            clearRefreshTokenCookie(res);
             res.status(200).json({ accessToken: null });
         } else {
             // For other errors (500, DB, etc.), return 500 and DON'T clear the cookie
@@ -188,7 +218,7 @@ export const logout = async (req: Request, res: Response) => {
             await authService.logout(refreshToken);
         }
 
-        res.clearCookie('refreshToken');
+        clearRefreshTokenCookie(res);
         res.status(200).json({ message: 'Logged out successfully' });
     } catch (error) {
         console.error('Logout error:', error);
@@ -198,15 +228,27 @@ export const logout = async (req: Request, res: Response) => {
 
 // HELPER
 
-function setRefreshTokenCookie(res: Response, token: string) {
+function refreshTokenCookieOptions() {
     const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', token, {
+    return {
         httpOnly: true,
-        // If your frontend and API are on different domains in production, cookies will NOT be sent
-        // unless SameSite=None + Secure=true.
+        secure: isProd,
+        sameSite: (isProd ? 'none' : 'lax') as 'none' | 'lax',
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+    };
+}
+
+function setRefreshTokenCookie(res: Response, token: string) {
+    res.cookie('refreshToken', token, refreshTokenCookieOptions());
+}
+
+function clearRefreshTokenCookie(res: Response) {
+    const isProd = process.env.NODE_ENV === 'production';
+    res.clearCookie('refreshToken', {
+        httpOnly: true,
         secure: isProd,
         sameSite: isProd ? 'none' : 'lax',
         path: '/',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     });
 }

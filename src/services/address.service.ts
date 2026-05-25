@@ -41,8 +41,8 @@ export async function createAddress(input: CreateAddressInput): Promise<CreateAd
   });
 
   // Validate customer exists
-  const customer = await prisma.customer.findUnique({
-    where: { id: input.customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: input.customerId, deletedAt: null },
     select: { id: true },
   });
 
@@ -99,8 +99,8 @@ export async function getCustomerAddresses(customerId: string): Promise<Address[
   });
 
   // Validate customer exists
-  const customer = await prisma.customer.findUnique({
-    where: { id: customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, deletedAt: null },
     select: { id: true },
   });
 

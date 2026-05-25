@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { AccessTokenPayload } from '../types/auth.types.js';
+import { prisma } from '../config/prisma.js';
+import { activeCustomerWhere } from '../services/customer.service.js';
 
 const ACCESS_TOKEN_SECRET = process.env.CUSTOMER_JWT_SECRET || 'access-secret';
 
@@ -16,7 +18,11 @@ declare global {
     }
 }
 
-export const customerAuthMiddleware = (req: Request, res: Response, next: NextFunction) => {
+export const customerAuthMiddleware = async (
+    req: Request,
+    res: Response,
+    next: NextFunction
+): Promise<void> => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -34,13 +40,23 @@ export const customerAuthMiddleware = (req: Request, res: Response, next: NextFu
             return;
         }
 
+        const customer = await prisma.customer.findFirst({
+            where: { id: decoded.customerId, ...activeCustomerWhere },
+            select: { id: true },
+        });
+
+        if (!customer) {
+            res.status(401).json({ error: 'Account has been deleted' });
+            return;
+        }
+
         req.customer = {
-            id: decoded.customerId,
+            id: customer.id,
             role: decoded.role,
         };
 
         next();
-    } catch (error) {
+    } catch {
         res.status(401).json({ error: 'Unauthorized: Invalid token' });
         return;
     }
