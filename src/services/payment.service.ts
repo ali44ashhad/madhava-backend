@@ -45,8 +45,8 @@ export async function initiateRazorpaySession(
   }
 
   // 1. Validate customer
-  const customer = await prisma.customer.findUnique({
-    where: { id: input.customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: input.customerId, deletedAt: null },
     select: { id: true },
   });
   if (!customer) {
