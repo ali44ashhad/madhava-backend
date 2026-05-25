@@ -14,6 +14,7 @@ router.post('/login/verify-otp', authController.loginVerifyOtp);
 // Profile
 import { customerAuthMiddleware } from '../middlewares/auth.middleware.js';
 router.get('/me', customerAuthMiddleware, authController.getMe);
+router.delete('/me', customerAuthMiddleware, authController.deleteMyAccount);
 
 // Legacy (Deprecated)
 router.post('/request-otp', authController.requestOtp); // DEPRECATED

@@ -209,9 +209,11 @@ model Customer {
   couponUsages CouponUsage[]
   reviews      Review[]
 
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
 
   @@index([phone])
+  @@index([deletedAt])
   @@map("customers")
 }
 

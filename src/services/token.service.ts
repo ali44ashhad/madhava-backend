@@ -2,12 +2,21 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma.js';
 import crypto from 'crypto';
 import { AccessTokenPayload } from '../types/auth.types.js';
+import { activeCustomerWhere } from './customer.service.js';
 
 const ACCESS_TOKEN_SECRET = process.env.CUSTOMER_JWT_SECRET || 'access-secret';
 const REFRESH_TOKEN_SECRET = process.env.CUSTOMER_REFRESH_SECRET || 'refresh-secret'; // Used for hashing generally
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 const REFRESH_ROTATION_GRACE_SECONDS = Number(process.env.REFRESH_ROTATION_GRACE_SECONDS || 60);
+
+async function isCustomerActive(customerId: string): Promise<boolean> {
+    const customer = await prisma.customer.findFirst({
+        where: { id: customerId, ...activeCustomerWhere },
+        select: { id: true },
+    });
+    return !!customer;
+}
 
 export const generateAccessToken = (customerId: string): string => {
     const payload: Omit<AccessTokenPayload, 'iat' | 'exp'> = {
@@ -58,6 +67,11 @@ export const verifyRefreshToken = async (token: string): Promise<string | null> 
         return null;
     }
 
+    if (!(await isCustomerActive(session.customerId))) {
+        await prisma.customerSession.delete({ where: { id: session.id } });
+        return null;
+    }
+
     return session.customerId;
 };
 
@@ -85,6 +99,11 @@ export const rotateRefreshToken = async (oldToken: string): Promise<{ newAccessT
 
     if (!session) return null;
     if (new Date() > session.expiresAt) {
+        await prisma.customerSession.delete({ where: { id: session.id } });
+        return null;
+    }
+
+    if (!(await isCustomerActive(session.customerId))) {
         await prisma.customerSession.delete({ where: { id: session.id } });
         return null;
     }

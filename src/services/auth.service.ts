@@ -2,6 +2,7 @@ import * as otpService from './otp.service.js';
 import * as smsService from './sms.service.js';
 import * as tokenService from './token.service.js';
 import * as customerService from './customer.service.js';
+import { activeCustomerWhere } from './customer.service.js';
 import { prisma } from '../config/prisma.js';
 import { AppError } from '../middlewares/error.middleware.js';
 
@@ -14,6 +15,7 @@ export const signupRequestOtp = async (input: { name: string; email: string; pho
     // 1. Check if customer already exists (by phone or email)
     const existingCustomer = await prisma.customer.findFirst({
         where: {
+            ...activeCustomerWhere,
             OR: [
                 { phone: cleanPhone },
                 { email: { equals: email, mode: 'insensitive' } }
@@ -69,7 +71,7 @@ export const loginRequestOtp = async (phone: string): Promise<void> => {
 
     // 1. Find Customer
     const customer = await prisma.customer.findFirst({
-        where: { phone: cleanPhone },
+        where: { phone: cleanPhone, ...activeCustomerWhere },
     });
 
     if (!customer) {
@@ -96,9 +98,13 @@ export const loginVerifyOtp = async (phone: string, otp: string) => {
     }
 
     // 2. Find Customer
-    const customer = await prisma.customer.findFirstOrThrow({
-        where: { phone: cleanPhone },
+    const customer = await prisma.customer.findFirst({
+        where: { phone: cleanPhone, ...activeCustomerWhere },
     });
+
+    if (!customer) {
+        throw new AppError('NOT_FOUND', 'Account not found', 404);
+    }
 
     // 3. Issue Tokens
     const accessToken = tokenService.generateAccessToken(customer.id);

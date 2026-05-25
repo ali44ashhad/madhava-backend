@@ -543,8 +543,8 @@ async function validateOrderInput(input: PlaceOrderInput): Promise<void> {
   // Re-evaluating this based on new logic: Frontend doesn't need to pass reference for Razorpay.
 
   // Validate customer exists
-  const customer = await prisma.customer.findUnique({
-    where: { id: input.customerId },
+  const customer = await prisma.customer.findFirst({
+    where: { id: input.customerId, deletedAt: null },
     select: { id: true },
   });
 
